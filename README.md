@@ -7,6 +7,8 @@
 ![SPM](https://img.shields.io/badge/Swift_Package_Manager-compatible-brightgreen.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
+📚 **[完全なドキュメント](https://no-problem-dev.github.io/swift-api-client/documentation/apiclient/)**
+
 ## 概要
 
 `swift-api-client` は、Swift アプリケーションで HTTP API 呼び出しをシンプルかつ型安全に行うためのパッケージです。iOS および macOS プラットフォームに対応し、モダンな並行処理機能をサポートしています。
