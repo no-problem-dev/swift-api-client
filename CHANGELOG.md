@@ -5,6 +5,10 @@
 このフォーマットは [Keep a Changelog](https://keepachangelog.com/ja/1.0.0/) に基づいており、
 このプロジェクトは [Semantic Versioning](https://semver.org/lang/ja/) に準拠しています。
 
+## [未リリース]
+
+なし
+
 ## [1.0.3] - 2025-11-04
 
 ### 追加
@@ -48,3 +52,8 @@
 - 認証サポート
 - HTTP ロギング機能
 - iOS 17.0+ および macOS 14.0+ サポート
+
+[未リリース]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.3...HEAD
+[1.0.3]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.1...v1.0.3
+[1.0.1]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/no-problem-dev/swift-api-client/releases/tag/v1.0.0
