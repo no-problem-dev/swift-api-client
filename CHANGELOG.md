@@ -63,3 +63,5 @@
 [1.0.3]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.1...v1.0.3
 [1.0.1]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/no-problem-dev/swift-api-client/releases/tag/v1.0.0
+
+<!-- Auto-generated on 2025-11-09T05:04:46Z by release workflow -->
