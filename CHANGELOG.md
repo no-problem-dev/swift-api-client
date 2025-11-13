@@ -9,6 +9,14 @@
 
 なし
 
+## [1.0.6] - 2025-11-13
+
+### 追加
+- `APIClientImpl`に`keyDecodingStrategy`パラメータを追加
+  - `JSONDecoder.KeyDecodingStrategy`を指定可能に
+  - デフォルト値は`.useDefaultKeys`（後方互換性を保持）
+  - スネークケースAPIレスポンス対応のため`.convertFromSnakeCase`を指定可能
+
 ## [1.0.4] - 2025-11-09
 
 ### 修正
