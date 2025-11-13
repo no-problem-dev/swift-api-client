@@ -9,6 +9,14 @@
 
 なし
 
+## [1.0.5] - 2025-11-13
+
+### 追加
+- `APIClientImpl`に`keyDecodingStrategy`パラメータを追加
+  - `JSONDecoder.KeyDecodingStrategy`を指定可能に（デフォルト: `.useDefaultKeys`）
+  - スネークケースAPIレスポンス対応のため`.convertFromSnakeCase`を指定可能
+  - 後方互換性を保持しながら、柔軟なキー変換に対応
+
 ## [1.0.4] - 2025-11-09
 
 ### 修正
@@ -58,8 +66,11 @@
 - HTTP ロギング機能
 - iOS 17.0+ および macOS 14.0+ サポート
 
-[未リリース]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.4...HEAD
+[未リリース]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.5...HEAD
+[1.0.5]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.1...v1.0.3
 [1.0.1]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/no-problem-dev/swift-api-client/releases/tag/v1.0.0
+
+<!-- Auto-generated on 2025-11-09T05:04:46Z by release workflow -->

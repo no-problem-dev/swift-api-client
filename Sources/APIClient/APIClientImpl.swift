@@ -8,6 +8,7 @@ public struct APIClientImpl: APIClient {
     private let timeout: TimeInterval
     private let defaultHeaders: [String: String]
     private let logger: HTTPLogger?
+    private let keyDecodingStrategy: JSONDecoder.KeyDecodingStrategy
 
     /// 初期化
     ///
@@ -18,13 +19,15 @@ public struct APIClientImpl: APIClient {
     ///   - enableDebugLog: デバッグログの有効化
     ///   - timeout: タイムアウト時間（秒）
     ///   - defaultHeaders: デフォルトヘッダー
+    ///   - keyDecodingStrategy: JSONキーのデコーディング戦略（デフォルト: .useDefaultKeys）
     public init(
         baseURL: URL,
         session: URLSession = .shared,
         authTokenProvider: AuthTokenProvider? = nil,
         enableDebugLog: Bool = false,
         timeout: TimeInterval = 60.0,
-        defaultHeaders: [String: String] = [:]
+        defaultHeaders: [String: String] = [:],
+        keyDecodingStrategy: JSONDecoder.KeyDecodingStrategy = .useDefaultKeys
     ) {
         self.baseURL = baseURL
         self.session = session
@@ -32,12 +35,15 @@ public struct APIClientImpl: APIClient {
         self.timeout = timeout
         self.defaultHeaders = defaultHeaders
         self.logger = enableDebugLog ? ConsoleHTTPLogger() : nil
+        self.keyDecodingStrategy = keyDecodingStrategy
     }
 
     public func request<T: Decodable>(_ endpoint: APIEndpoint) async throws -> T {
         let data = try await performRequest(endpoint)
 
         let decoder = JSONDecoder()
+        // キーデコーディング戦略を適用
+        decoder.keyDecodingStrategy = keyDecodingStrategy
         // カスタムISO8601日付フォーマット対応
         decoder.dateDecodingStrategy = .custom { decoder in
             let container = try decoder.singleValueContainer()
