@@ -15,6 +15,13 @@ import Foundation
 ///
 /// - Note: このプロトコルに準拠する実装は`Sendable`である必要があります
 public protocol APIClient: Sendable {
+    /// オブジェクトをJSONデータにエンコードする
+    /// APIClientの日付エンコーディング戦略が適用される
+    /// - Parameter value: エンコードする値
+    /// - Returns: エンコードされたJSONデータ
+    /// - Throws: エンコードエラー
+    func encode<T: Encodable>(_ value: T) throws -> Data
+
     /// レスポンスをデコードしてジェネリック型として返すリクエストメソッド
     /// - Parameter endpoint: リクエスト情報を含むエンドポイント
     /// - Returns: デコードされたレスポンスオブジェクト
