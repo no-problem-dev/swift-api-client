@@ -9,6 +9,22 @@
 
 なし
 
+## [1.0.6] - 2025-11-15
+
+### 追加
+- `APIClientImpl`に`dateEncodingStrategy`パラメータを追加
+  - `JSONEncoder.DateEncodingStrategy`を指定可能に（デフォルト: `.iso8601`）
+  - バックエンドAPI（Go）のRFC3339形式に対応
+  - リクエストボディの日付フィールドを正しくエンコード可能に
+- `encode<T: Encodable>`メソッドを追加
+  - リクエストボディのJSON文字列生成に統一的な日付エンコーディング戦略を適用
+  - デバッグ時のログ出力で日付形式の一貫性を保証
+
+### 変更
+- リクエストボディのエンコーディングロジックをリファクタリング
+  - 従来の`JSONEncoder()`直接使用から`encode`メソッド経由に統一
+  - すべてのPOST/PUT/PATCHリクエストで日付エンコーディング戦略を適用
+
 ## [1.0.5] - 2025-11-13
 
 ### 追加
@@ -66,13 +82,12 @@
 - HTTP ロギング機能
 - iOS 17.0+ および macOS 14.0+ サポート
 
-[未リリース]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.5...HEAD
+[未リリース]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.6...HEAD
+[1.0.6]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.1...v1.0.3
 [1.0.1]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/no-problem-dev/swift-api-client/releases/tag/v1.0.0
 
-<!-- Auto-generated on 2025-11-09T05:04:46Z by release workflow -->
-
-<!-- Auto-generated on 2025-11-13T01:05:13Z by release workflow -->
+<!-- Auto-generated on 2025-11-15T01:10:00Z by release workflow -->
