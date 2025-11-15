@@ -8,7 +8,8 @@ public struct APIClientImpl: APIClient {
     private let timeout: TimeInterval
     private let defaultHeaders: [String: String]
     private let logger: HTTPLogger?
-    private let keyDecodingStrategy: JSONDecoder.KeyDecodingStrategy
+    private let encoder: JSONEncoder
+    private let decoder: JSONDecoder
 
     /// 初期化
     ///
@@ -20,6 +21,8 @@ public struct APIClientImpl: APIClient {
     ///   - timeout: タイムアウト時間（秒）
     ///   - defaultHeaders: デフォルトヘッダー
     ///   - keyDecodingStrategy: JSONキーのデコーディング戦略（デフォルト: .useDefaultKeys）
+    ///   - dateEncodingStrategy: 日付のエンコーディング戦略（デフォルト: RFC3339）
+    ///   - dateDecodingStrategy: 日付のデコーディング戦略（デフォルト: RFC3339フォールバック付き）
     public init(
         baseURL: URL,
         session: URLSession = .shared,
@@ -27,7 +30,9 @@ public struct APIClientImpl: APIClient {
         enableDebugLog: Bool = false,
         timeout: TimeInterval = 60.0,
         defaultHeaders: [String: String] = [:],
-        keyDecodingStrategy: JSONDecoder.KeyDecodingStrategy = .useDefaultKeys
+        keyDecodingStrategy: JSONDecoder.KeyDecodingStrategy = .useDefaultKeys,
+        dateEncodingStrategy: JSONEncoder.DateEncodingStrategy? = nil,
+        dateDecodingStrategy: JSONDecoder.DateDecodingStrategy? = nil
     ) {
         self.baseURL = baseURL
         self.session = session
@@ -35,54 +40,25 @@ public struct APIClientImpl: APIClient {
         self.timeout = timeout
         self.defaultHeaders = defaultHeaders
         self.logger = enableDebugLog ? ConsoleHTTPLogger() : nil
-        self.keyDecodingStrategy = keyDecodingStrategy
+
+        // Encoder の設定
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = dateEncodingStrategy ?? Self.defaultDateEncodingStrategy()
+        self.encoder = encoder
+
+        // Decoder の設定
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = keyDecodingStrategy
+        decoder.dateDecodingStrategy = dateDecodingStrategy ?? Self.defaultDateDecodingStrategy()
+        self.decoder = decoder
+    }
+
+    public func encode<T: Encodable>(_ value: T) throws -> Data {
+        try encoder.encode(value)
     }
 
     public func request<T: Decodable>(_ endpoint: APIEndpoint) async throws -> T {
         let data = try await performRequest(endpoint)
-
-        let decoder = JSONDecoder()
-        // キーデコーディング戦略を適用
-        decoder.keyDecodingStrategy = keyDecodingStrategy
-        // カスタムISO8601日付フォーマット対応
-        decoder.dateDecodingStrategy = .custom { decoder in
-            let container = try decoder.singleValueContainer()
-            let dateString = try container.decode(String.self)
-
-            // ミリ秒付きISO8601フォーマット
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSZZZZZ"
-            formatter.calendar = Calendar(identifier: .iso8601)
-            formatter.timeZone = TimeZone(secondsFromGMT: 0)
-            formatter.locale = Locale(identifier: "en_US_POSIX")
-
-            if let date = formatter.date(from: dateString) {
-                return date
-            }
-
-            // ミリ秒なしISO8601フォーマット
-            formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZZZZZ"
-            if let date = formatter.date(from: dateString) {
-                return date
-            }
-
-            // 標準ISO8601フォーマット
-            let isoFormatter = ISO8601DateFormatter()
-            isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = isoFormatter.date(from: dateString) {
-                return date
-            }
-
-            isoFormatter.formatOptions = [.withInternetDateTime]
-            if let date = isoFormatter.date(from: dateString) {
-                return date
-            }
-
-            throw DecodingError.dataCorruptedError(
-                in: container,
-                debugDescription: "Invalid date format: \(dateString)"
-            )
-        }
 
         do {
             return try decoder.decode(T.self, from: data)
@@ -179,4 +155,49 @@ public struct APIClientImpl: APIClient {
 /// 空のレスポンス型
 public struct EmptyResponse: Sendable, Codable {
     public init() {}
+}
+
+// MARK: - Date Encoding/Decoding Strategies
+extension APIClientImpl {
+    static func defaultDateEncodingStrategy() -> JSONEncoder.DateEncodingStrategy {
+        .custom { date, encoder in
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime]
+            let dateString = formatter.string(from: date)
+            var container = encoder.singleValueContainer()
+            try container.encode(dateString)
+        }
+    }
+
+    static func defaultDateDecodingStrategy() -> JSONDecoder.DateDecodingStrategy {
+        .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let dateString = try container.decode(String.self)
+
+            let isoFormatter = ISO8601DateFormatter()
+            isoFormatter.formatOptions = [.withInternetDateTime]
+            if let date = isoFormatter.date(from: dateString) {
+                return date
+            }
+
+            isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = isoFormatter.date(from: dateString) {
+                return date
+            }
+
+            let fallbackFormatter = DateFormatter()
+            fallbackFormatter.dateFormat = "yyyy-MM-dd"
+            fallbackFormatter.calendar = Calendar(identifier: .iso8601)
+            fallbackFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+            fallbackFormatter.locale = Locale(identifier: "en_US_POSIX")
+            if let date = fallbackFormatter.date(from: dateString) {
+                return date
+            }
+
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Invalid date format: \(dateString). Expected RFC3339 (e.g., '2024-01-15T10:30:00Z') or date-only (e.g., '2024-01-15')"
+            )
+        }
+    }
 }
