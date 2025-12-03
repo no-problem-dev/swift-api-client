@@ -32,4 +32,63 @@ public protocol APIClient: Sendable {
     /// - Parameter endpoint: リクエスト情報を含むエンドポイント
     /// - Throws: `APIError` - ネットワークエラー、HTTPエラーなど
     func request(_ endpoint: APIEndpoint) async throws
+
+    /// 重要なHTTPイベント（401, 503等）のストリーム
+    ///
+    /// アプリケーション全体で処理すべき重要なHTTPレスポンス（認証エラー、サービス停止等）を
+    /// 非同期ストリームとして提供します。
+    ///
+    /// 呼び出しごとに独立したストリームを返すため、複数箇所から購読できます。
+    ///
+    /// ## 使用例
+    /// ```swift
+    /// Task {
+    ///     for await event in await client.events {
+    ///         switch event {
+    ///         case .unauthorized:
+    ///             await authManager.handleLogout()
+    ///         case .serviceUnavailable:
+    ///             await router.showMaintenanceScreen()
+    ///         default:
+    ///             break
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// - Note: イベントはエラーのthrowと同時に発行されます。
+    ///   従来のエラーハンドリングと併用してください。
+    var events: AsyncStream<HTTPEvent> { get async }
+
+    /// HTTPリクエスト/レスポンスのログストリーム
+    ///
+    /// すべてのHTTP通信のログ（成功、エラー、デコードエラー）を
+    /// 非同期ストリームとして提供します。
+    ///
+    /// 呼び出しごとに独立したストリームを返すため、複数箇所から購読できます。
+    ///
+    /// ## 使用例
+    /// ```swift
+    /// // デバッグ用コンソール出力
+    /// Task {
+    ///     for await log in await client.logs {
+    ///         switch log {
+    ///         case .success(let endpoint, let statusCode, _):
+    ///             print("✅ \(endpoint.path): \(statusCode)")
+    ///         case .httpError(let endpoint, let statusCode, _):
+    ///             print("❌ \(endpoint.path): \(statusCode)")
+    ///         case .decodingError(let endpoint, let error, _, _):
+    ///             print("⚠️ \(endpoint.path): \(error)")
+    ///         }
+    ///     }
+    /// }
+    ///
+    /// // Analytics送信
+    /// Task {
+    ///     for await log in await client.logs {
+    ///         analytics.track(log)
+    ///     }
+    /// }
+    /// ```
+    var logs: AsyncStream<HTTPLog> { get async }
 }

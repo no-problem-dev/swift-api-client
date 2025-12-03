@@ -7,9 +7,10 @@ public struct APIClientImpl: APIClient {
     private let authTokenProvider: AuthTokenProvider?
     private let timeout: TimeInterval
     private let defaultHeaders: [String: String]
-    private let logger: HTTPLogger?
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    private let eventSource = MulticastStreamSource<HTTPEvent>()
+    private let logSource = MulticastStreamSource<HTTPLog>()
 
     /// 初期化
     ///
@@ -17,7 +18,6 @@ public struct APIClientImpl: APIClient {
     ///   - baseURL: APIのベースURL
     ///   - session: URLSession
     ///   - authTokenProvider: 認証トークンプロバイダー
-    ///   - enableDebugLog: デバッグログの有効化
     ///   - timeout: タイムアウト時間（秒）
     ///   - defaultHeaders: デフォルトヘッダー
     ///   - keyDecodingStrategy: JSONキーのデコーディング戦略（デフォルト: .useDefaultKeys）
@@ -27,7 +27,6 @@ public struct APIClientImpl: APIClient {
         baseURL: URL,
         session: URLSession = .shared,
         authTokenProvider: AuthTokenProvider? = nil,
-        enableDebugLog: Bool = false,
         timeout: TimeInterval = 60.0,
         defaultHeaders: [String: String] = [:],
         keyDecodingStrategy: JSONDecoder.KeyDecodingStrategy = .useDefaultKeys,
@@ -39,7 +38,6 @@ public struct APIClientImpl: APIClient {
         self.authTokenProvider = authTokenProvider
         self.timeout = timeout
         self.defaultHeaders = defaultHeaders
-        self.logger = enableDebugLog ? ConsoleHTTPLogger() : nil
 
         // Encoder の設定
         let encoder = JSONEncoder()
@@ -51,6 +49,19 @@ public struct APIClientImpl: APIClient {
         decoder.keyDecodingStrategy = keyDecodingStrategy
         decoder.dateDecodingStrategy = dateDecodingStrategy ?? Self.defaultDateDecodingStrategy()
         self.decoder = decoder
+
+    }
+
+    public var events: AsyncStream<HTTPEvent> {
+        get async {
+            await eventSource.stream
+        }
+    }
+
+    public var logs: AsyncStream<HTTPLog> {
+        get async {
+            await logSource.stream
+        }
     }
 
     public func encode<T: Encodable>(_ value: T) throws -> Data {
@@ -63,12 +74,12 @@ public struct APIClientImpl: APIClient {
         do {
             return try decoder.decode(T.self, from: data)
         } catch {
-            logger?.logDecodingError(
-                error: error,
+            await logSource.emit(.decodingError(
                 endpoint: endpoint,
-                responseData: data,
-                targetType: T.self
-            )
+                error: String(describing: error),
+                data: data,
+                targetType: String(describing: T.self)
+            ))
             throw APIError.decodingError(error)
         }
     }
@@ -118,31 +129,42 @@ public struct APIClientImpl: APIClient {
                 throw APIError.invalidResponse
             }
 
-            switch httpResponse.statusCode {
+            let statusCode = httpResponse.statusCode
+
+            switch statusCode {
             case 200...299:
-                logger?.logSuccess(endpoint: endpoint, statusCode: httpResponse.statusCode, responseData: data)
+                await logSource.emit(.success(endpoint: endpoint, statusCode: statusCode, data: data))
                 return data
             case 400:
-                logger?.logHTTPError(statusCode: 400, endpoint: endpoint, data: data)
-                throw APIError.httpError(statusCode: 400, data: data)
+                await logSource.emit(.httpError(endpoint: endpoint, statusCode: statusCode, data: data))
+                throw APIError.httpError(statusCode: statusCode, data: data)
             case 401:
-                logger?.logHTTPError(statusCode: 401, endpoint: endpoint, data: data)
+                await logSource.emit(.httpError(endpoint: endpoint, statusCode: statusCode, data: data))
+                await eventSource.emit(.unauthorized(endpoint: endpoint, data: data))
                 throw APIError.unauthorized
             case 403:
-                logger?.logHTTPError(statusCode: 403, endpoint: endpoint, data: data)
+                await logSource.emit(.httpError(endpoint: endpoint, statusCode: statusCode, data: data))
+                await eventSource.emit(.forbidden(endpoint: endpoint, data: data))
                 throw APIError.unauthorized
             case 404:
-                logger?.logHTTPError(statusCode: 404, endpoint: endpoint, data: data)
-                throw APIError.httpError(statusCode: 404, data: data)
+                await logSource.emit(.httpError(endpoint: endpoint, statusCode: statusCode, data: data))
+                throw APIError.httpError(statusCode: statusCode, data: data)
             case 429:
-                logger?.logHTTPError(statusCode: 429, endpoint: endpoint, data: data)
-                throw APIError.httpError(statusCode: 429, data: data)
+                await logSource.emit(.httpError(endpoint: endpoint, statusCode: statusCode, data: data))
+                let retryAfter = Self.parseRetryAfter(from: httpResponse)
+                await eventSource.emit(.rateLimited(endpoint: endpoint, retryAfter: retryAfter, data: data))
+                throw APIError.httpError(statusCode: statusCode, data: data)
+            case 503:
+                await logSource.emit(.httpError(endpoint: endpoint, statusCode: statusCode, data: data))
+                await eventSource.emit(.serviceUnavailable(endpoint: endpoint, data: data))
+                throw APIError.httpError(statusCode: statusCode, data: data)
             case 500...599:
-                logger?.logHTTPError(statusCode: httpResponse.statusCode, endpoint: endpoint, data: data)
-                throw APIError.httpError(statusCode: httpResponse.statusCode, data: data)
+                await logSource.emit(.httpError(endpoint: endpoint, statusCode: statusCode, data: data))
+                await eventSource.emit(.serverError(statusCode: statusCode, endpoint: endpoint, data: data))
+                throw APIError.httpError(statusCode: statusCode, data: data)
             default:
-                logger?.logHTTPError(statusCode: httpResponse.statusCode, endpoint: endpoint, data: data)
-                throw APIError.httpError(statusCode: httpResponse.statusCode, data: data)
+                await logSource.emit(.httpError(endpoint: endpoint, statusCode: statusCode, data: data))
+                throw APIError.httpError(statusCode: statusCode, data: data)
             }
         } catch let error as APIError {
             throw error
@@ -155,6 +177,32 @@ public struct APIClientImpl: APIClient {
 /// 空のレスポンス型
 public struct EmptyResponse: Sendable, Codable {
     public init() {}
+}
+
+// MARK: - HTTP Header Parsing
+extension APIClientImpl {
+    /// Retry-Afterヘッダーから待機時間を解析
+    static func parseRetryAfter(from response: HTTPURLResponse) -> TimeInterval? {
+        guard let retryAfterValue = response.value(forHTTPHeaderField: "Retry-After") else {
+            return nil
+        }
+
+        // 秒数として解析を試みる
+        if let seconds = TimeInterval(retryAfterValue) {
+            return seconds
+        }
+
+        // HTTP-date形式として解析を試みる
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        if let date = formatter.date(from: retryAfterValue) {
+            let interval = date.timeIntervalSinceNow
+            return interval > 0 ? interval : nil
+        }
+
+        return nil
+    }
 }
 
 // MARK: - Date Encoding/Decoding Strategies

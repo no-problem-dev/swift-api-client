@@ -7,7 +7,24 @@
 
 ## [未リリース]
 
-なし
+## [1.0.7] - 2025-12-03
+
+### 追加
+- **HTTPイベントストリーム機能**
+  - `HTTPEvent`: 重要なHTTPレスポンス（401, 403, 429, 503, 5xx）を表すイベント型
+  - `APIClient.events`: 複数購読可能なイベントストリームプロパティ
+  - 認証エラー、レート制限、サービス停止等をアプリ全体で一元的にハンドリング可能に
+- **HTTPログストリーム機能**
+  - `HTTPLog`: リクエスト/レスポンスのログエントリ型（CustomStringConvertible対応）
+  - `APIClient.logs`: 複数購読可能なログストリームプロパティ
+  - `print(log)`で整形済みログを簡単に出力可能
+- **MulticastStreamSource<Element>**
+  - 汎用的なマルチキャストAsyncStreamソース（Actor実装）
+  - 複数購読者への同時配信、自動クリーンアップをサポート
+
+### 削除
+- `HTTPLogger`クラスを削除（`logs`ストリームに置き換え）
+- `enableDebugLog`パラメータを削除
 
 ## [1.0.6] - 2025-11-15
 
@@ -82,7 +99,8 @@
 - HTTP ロギング機能
 - iOS 17.0+ および macOS 14.0+ サポート
 
-[未リリース]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.6...HEAD
+[未リリース]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.7...HEAD
+[1.0.7]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.6...v1.0.7
 [1.0.6]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.3...v1.0.4
@@ -91,3 +109,5 @@
 [1.0.0]: https://github.com/no-problem-dev/swift-api-client/releases/tag/v1.0.0
 
 <!-- Auto-generated on 2025-11-15T01:10:00Z by release workflow -->
+
+<!-- Auto-generated on 2025-11-15T01:09:07Z by release workflow -->
