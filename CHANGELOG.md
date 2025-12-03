@@ -7,6 +7,8 @@
 
 ## [未リリース]
 
+## [1.0.7] - 2025-12-03
+
 ### 追加
 - **HTTPイベントストリーム機能**
   - `HTTPEvent`: 重要なHTTPレスポンス（401, 403, 429, 503, 5xx）を表すイベント型
@@ -97,7 +99,8 @@
 - HTTP ロギング機能
 - iOS 17.0+ および macOS 14.0+ サポート
 
-[未リリース]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.6...HEAD
+[未リリース]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.7...HEAD
+[1.0.7]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.6...v1.0.7
 [1.0.6]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.3...v1.0.4
