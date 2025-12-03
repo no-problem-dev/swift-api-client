@@ -7,7 +7,22 @@
 
 ## [未リリース]
 
-なし
+### 追加
+- **HTTPイベントストリーム機能**
+  - `HTTPEvent`: 重要なHTTPレスポンス（401, 403, 429, 503, 5xx）を表すイベント型
+  - `APIClient.events`: 複数購読可能なイベントストリームプロパティ
+  - 認証エラー、レート制限、サービス停止等をアプリ全体で一元的にハンドリング可能に
+- **HTTPログストリーム機能**
+  - `HTTPLog`: リクエスト/レスポンスのログエントリ型（CustomStringConvertible対応）
+  - `APIClient.logs`: 複数購読可能なログストリームプロパティ
+  - `print(log)`で整形済みログを簡単に出力可能
+- **MulticastStreamSource<Element>**
+  - 汎用的なマルチキャストAsyncStreamソース（Actor実装）
+  - 複数購読者への同時配信、自動クリーンアップをサポート
+
+### 削除
+- `HTTPLogger`クラスを削除（`logs`ストリームに置き換え）
+- `enableDebugLog`パラメータを削除
 
 ## [1.0.6] - 2025-11-15
 

@@ -20,7 +20,8 @@
 - ✅ **自動 JSON デコーディング** - Codable を使った簡単なレスポンス処理
 - ✅ **柔軟なエラーハンドリング** - 詳細なエラー情報を提供
 - ✅ **認証サポート** - トークンプロバイダーによる認証統合
-- ✅ **HTTP ロギング** - リクエスト/レスポンスのデバッグ機能
+- ✅ **HTTP イベントストリーム** - 認証エラー・レート制限等の重要イベントをAsyncStreamで通知
+- ✅ **HTTP ログストリーム** - 全リクエスト/レスポンスをAsyncStreamで監視可能
 - ✅ **ゼロ依存** - 外部ライブラリを使わない軽量設計
 - ✅ **クロスプラットフォーム** - iOS および macOS 対応
 
@@ -171,14 +172,53 @@ let client = APIClientImpl(
 let user: User = try await client.request(endpoint)
 ```
 
-### HTTP ロギングの有効化
+### HTTP イベントの監視
+
+重要なHTTPレスポンス（401, 403, 429, 503, 5xx）をアプリ全体で監視できます。
 
 ```swift
-// デバッグ時にリクエスト/レスポンスをログ出力
-let client = APIClientImpl(
-    baseURL: URL(string: "https://api.example.com")!,
-    enableLogging: true
-)
+// 認証エラーやサービス停止を一元的にハンドリング
+Task {
+    for await event in await client.events {
+        switch event {
+        case .unauthorized:
+            await authManager.handleLogout()
+        case .rateLimited(_, let retryAfter, _):
+            print("レート制限: \(retryAfter ?? 0)秒後にリトライ")
+        case .serviceUnavailable:
+            await router.showMaintenanceScreen()
+        default:
+            break
+        }
+    }
+}
+```
+
+### HTTP ログの監視
+
+全リクエスト/レスポンスをAsyncStreamで監視できます。
+
+```swift
+// デバッグ用コンソール出力（CustomStringConvertibleによる整形済み出力）
+Task {
+    for await log in await client.logs {
+        print(log)  // 自動的に整形されたログが出力されます
+    }
+}
+
+// カスタム処理（Analytics送信など）
+Task {
+    for await log in await client.logs {
+        switch log {
+        case .success(let endpoint, let statusCode, _):
+            analytics.trackSuccess(endpoint: endpoint.path, statusCode: statusCode)
+        case .httpError(let endpoint, let statusCode, _):
+            analytics.trackError(endpoint: endpoint.path, statusCode: statusCode)
+        case .decodingError(let endpoint, _, _, let targetType):
+            analytics.trackDecodingError(endpoint: endpoint.path, type: targetType)
+        }
+    }
+}
 ```
 
 ## ライセンス
