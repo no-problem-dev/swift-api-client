@@ -32,4 +32,31 @@ public protocol APIClient: Sendable {
     /// - Parameter endpoint: リクエスト情報を含むエンドポイント
     /// - Throws: `APIError` - ネットワークエラー、HTTPエラーなど
     func request(_ endpoint: APIEndpoint) async throws
+
+    /// 重要なHTTPイベント（401, 503等）のストリーム
+    ///
+    /// アプリケーション全体で処理すべき重要なHTTPレスポンス（認証エラー、サービス停止等）を
+    /// 非同期ストリームとして提供します。
+    ///
+    /// 呼び出しごとに独立したストリームを返すため、複数箇所から購読できます。
+    ///
+    /// ## 使用例
+    /// ```swift
+    /// Task {
+    ///     for await event in await client.events {
+    ///         switch event {
+    ///         case .unauthorized:
+    ///             await authManager.handleLogout()
+    ///         case .serviceUnavailable:
+    ///             await router.showMaintenanceScreen()
+    ///         default:
+    ///             break
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// - Note: イベントはエラーのthrowと同時に発行されます。
+    ///   従来のエラーハンドリングと併用してください。
+    var events: AsyncStream<HTTPEvent> { get async }
 }
