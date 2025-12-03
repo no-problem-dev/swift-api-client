@@ -10,6 +10,7 @@ public struct APIClientImpl: APIClient {
     private let logger: HTTPLogger?
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    private let eventSource = HTTPEventSource()
 
     /// 初期化
     ///
@@ -51,6 +52,13 @@ public struct APIClientImpl: APIClient {
         decoder.keyDecodingStrategy = keyDecodingStrategy
         decoder.dateDecodingStrategy = dateDecodingStrategy ?? Self.defaultDateDecodingStrategy()
         self.decoder = decoder
+
+    }
+
+    public var events: AsyncStream<HTTPEvent> {
+        get async {
+            await eventSource.events
+        }
     }
 
     public func encode<T: Encodable>(_ value: T) throws -> Data {
@@ -127,18 +135,27 @@ public struct APIClientImpl: APIClient {
                 throw APIError.httpError(statusCode: 400, data: data)
             case 401:
                 logger?.logHTTPError(statusCode: 401, endpoint: endpoint, data: data)
+                await eventSource.emit(.unauthorized(endpoint: endpoint, data: data))
                 throw APIError.unauthorized
             case 403:
                 logger?.logHTTPError(statusCode: 403, endpoint: endpoint, data: data)
+                await eventSource.emit(.forbidden(endpoint: endpoint, data: data))
                 throw APIError.unauthorized
             case 404:
                 logger?.logHTTPError(statusCode: 404, endpoint: endpoint, data: data)
                 throw APIError.httpError(statusCode: 404, data: data)
             case 429:
                 logger?.logHTTPError(statusCode: 429, endpoint: endpoint, data: data)
+                let retryAfter = Self.parseRetryAfter(from: httpResponse)
+                await eventSource.emit(.rateLimited(endpoint: endpoint, retryAfter: retryAfter, data: data))
                 throw APIError.httpError(statusCode: 429, data: data)
+            case 503:
+                logger?.logHTTPError(statusCode: 503, endpoint: endpoint, data: data)
+                await eventSource.emit(.serviceUnavailable(endpoint: endpoint, data: data))
+                throw APIError.httpError(statusCode: 503, data: data)
             case 500...599:
                 logger?.logHTTPError(statusCode: httpResponse.statusCode, endpoint: endpoint, data: data)
+                await eventSource.emit(.serverError(statusCode: httpResponse.statusCode, endpoint: endpoint, data: data))
                 throw APIError.httpError(statusCode: httpResponse.statusCode, data: data)
             default:
                 logger?.logHTTPError(statusCode: httpResponse.statusCode, endpoint: endpoint, data: data)
@@ -155,6 +172,32 @@ public struct APIClientImpl: APIClient {
 /// 空のレスポンス型
 public struct EmptyResponse: Sendable, Codable {
     public init() {}
+}
+
+// MARK: - HTTP Header Parsing
+extension APIClientImpl {
+    /// Retry-Afterヘッダーから待機時間を解析
+    static func parseRetryAfter(from response: HTTPURLResponse) -> TimeInterval? {
+        guard let retryAfterValue = response.value(forHTTPHeaderField: "Retry-After") else {
+            return nil
+        }
+
+        // 秒数として解析を試みる
+        if let seconds = TimeInterval(retryAfterValue) {
+            return seconds
+        }
+
+        // HTTP-date形式として解析を試みる
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        if let date = formatter.date(from: retryAfterValue) {
+            let interval = date.timeIntervalSinceNow
+            return interval > 0 ? interval : nil
+        }
+
+        return nil
+    }
 }
 
 // MARK: - Date Encoding/Decoding Strategies
