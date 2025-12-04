@@ -7,6 +7,24 @@
 
 ## [未リリース]
 
+## [1.0.8] - 2025-12-05
+
+### 変更
+- **ストリーム設計の簡素化**: マルチキャストからユニキャストへ変更
+  - `MulticastStreamSource.swift` を削除
+  - `AsyncStream.makeStream()` を直接使用するシンプルな実装に
+  - Actor排除により `await` が不要に（パフォーマンス向上）
+  - `stream`/`continuation` の標準命名パターンを採用
+
+### 削除
+- `MulticastStreamSource<Element>` を削除
+
+### 破壊的変更
+- `events`/`logs` プロパティから `async` を削除
+  - 変更前: `for await event in await client.events`
+  - 変更後: `for await event in client.events`
+- 複数購読は非サポート（DIコンテナで単一購読を推奨）
+
 ## [1.0.7] - 2025-12-03
 
 ### 追加
@@ -99,7 +117,8 @@
 - HTTP ロギング機能
 - iOS 17.0+ および macOS 14.0+ サポート
 
-[未リリース]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.7...HEAD
+[未リリース]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.8...HEAD
+[1.0.8]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.7...v1.0.8
 [1.0.7]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.6...v1.0.7
 [1.0.6]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.4...v1.0.5
