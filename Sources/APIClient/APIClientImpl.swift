@@ -9,8 +9,12 @@ public struct APIClientImpl: APIClient {
     private let defaultHeaders: [String: String]
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
-    private let eventSource = MulticastStreamSource<HTTPEvent>()
-    private let logSource = MulticastStreamSource<HTTPLog>()
+
+    public let events: AsyncStream<HTTPEvent>
+    private let eventContinuation: AsyncStream<HTTPEvent>.Continuation
+
+    public let logs: AsyncStream<HTTPLog>
+    private let logContinuation: AsyncStream<HTTPLog>.Continuation
 
     /// 初期化
     ///
@@ -50,18 +54,9 @@ public struct APIClientImpl: APIClient {
         decoder.dateDecodingStrategy = dateDecodingStrategy ?? Self.defaultDateDecodingStrategy()
         self.decoder = decoder
 
-    }
-
-    public var events: AsyncStream<HTTPEvent> {
-        get async {
-            await eventSource.stream
-        }
-    }
-
-    public var logs: AsyncStream<HTTPLog> {
-        get async {
-            await logSource.stream
-        }
+        // AsyncStream の初期化
+        (self.events, self.eventContinuation) = AsyncStream.makeStream(of: HTTPEvent.self, bufferingPolicy: .unbounded)
+        (self.logs, self.logContinuation) = AsyncStream.makeStream(of: HTTPLog.self, bufferingPolicy: .unbounded)
     }
 
     public func encode<T: Encodable>(_ value: T) throws -> Data {
@@ -74,7 +69,7 @@ public struct APIClientImpl: APIClient {
         do {
             return try decoder.decode(T.self, from: data)
         } catch {
-            await logSource.emit(.decodingError(
+            logContinuation.yield(.decodingError(
                 endpoint: endpoint,
                 error: String(describing: error),
                 data: data,
@@ -133,37 +128,37 @@ public struct APIClientImpl: APIClient {
 
             switch statusCode {
             case 200...299:
-                await logSource.emit(.success(endpoint: endpoint, statusCode: statusCode, data: data))
+                logContinuation.yield(.success(endpoint: endpoint, statusCode: statusCode, data: data))
                 return data
             case 400:
-                await logSource.emit(.httpError(endpoint: endpoint, statusCode: statusCode, data: data))
+                logContinuation.yield(.httpError(endpoint: endpoint, statusCode: statusCode, data: data))
                 throw APIError.httpError(statusCode: statusCode, data: data)
             case 401:
-                await logSource.emit(.httpError(endpoint: endpoint, statusCode: statusCode, data: data))
-                await eventSource.emit(.unauthorized(endpoint: endpoint, data: data))
+                logContinuation.yield(.httpError(endpoint: endpoint, statusCode: statusCode, data: data))
+                eventContinuation.yield(.unauthorized(endpoint: endpoint, data: data))
                 throw APIError.unauthorized
             case 403:
-                await logSource.emit(.httpError(endpoint: endpoint, statusCode: statusCode, data: data))
-                await eventSource.emit(.forbidden(endpoint: endpoint, data: data))
+                logContinuation.yield(.httpError(endpoint: endpoint, statusCode: statusCode, data: data))
+                eventContinuation.yield(.forbidden(endpoint: endpoint, data: data))
                 throw APIError.unauthorized
             case 404:
-                await logSource.emit(.httpError(endpoint: endpoint, statusCode: statusCode, data: data))
+                logContinuation.yield(.httpError(endpoint: endpoint, statusCode: statusCode, data: data))
                 throw APIError.httpError(statusCode: statusCode, data: data)
             case 429:
-                await logSource.emit(.httpError(endpoint: endpoint, statusCode: statusCode, data: data))
+                logContinuation.yield(.httpError(endpoint: endpoint, statusCode: statusCode, data: data))
                 let retryAfter = Self.parseRetryAfter(from: httpResponse)
-                await eventSource.emit(.rateLimited(endpoint: endpoint, retryAfter: retryAfter, data: data))
+                eventContinuation.yield(.rateLimited(endpoint: endpoint, retryAfter: retryAfter, data: data))
                 throw APIError.httpError(statusCode: statusCode, data: data)
             case 503:
-                await logSource.emit(.httpError(endpoint: endpoint, statusCode: statusCode, data: data))
-                await eventSource.emit(.serviceUnavailable(endpoint: endpoint, data: data))
+                logContinuation.yield(.httpError(endpoint: endpoint, statusCode: statusCode, data: data))
+                eventContinuation.yield(.serviceUnavailable(endpoint: endpoint, data: data))
                 throw APIError.httpError(statusCode: statusCode, data: data)
             case 500...599:
-                await logSource.emit(.httpError(endpoint: endpoint, statusCode: statusCode, data: data))
-                await eventSource.emit(.serverError(statusCode: statusCode, endpoint: endpoint, data: data))
+                logContinuation.yield(.httpError(endpoint: endpoint, statusCode: statusCode, data: data))
+                eventContinuation.yield(.serverError(statusCode: statusCode, endpoint: endpoint, data: data))
                 throw APIError.httpError(statusCode: statusCode, data: data)
             default:
-                await logSource.emit(.httpError(endpoint: endpoint, statusCode: statusCode, data: data))
+                logContinuation.yield(.httpError(endpoint: endpoint, statusCode: statusCode, data: data))
                 throw APIError.httpError(statusCode: statusCode, data: data)
             }
         } catch let error as APIError {
