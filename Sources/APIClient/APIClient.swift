@@ -1,3 +1,4 @@
+@_exported import APIContract
 import Foundation
 
 /// HTTPベースのAPI通信を抽象化するクライアントインターフェース
@@ -14,7 +15,7 @@ import Foundation
 /// ```
 ///
 /// - Note: このプロトコルに準拠する実装は`Sendable`である必要があります
-public protocol APIClient: Sendable {
+public protocol APIClient: APIExecutor {
     /// オブジェクトをJSONデータにエンコードする
     /// APIClientの日付エンコーディング戦略が適用される
     /// - Parameter value: エンコードする値
@@ -92,4 +93,6 @@ public protocol APIClient: Sendable {
     /// - Important: このストリームは一度のみ購読可能（ユニキャスト設計）です。
     ///   DIコンテナ等で単一の購読Taskを立て、そこから各ハンドラーへ配信してください。
     var logs: AsyncStream<HTTPLog> { get }
+
+    // NOTE: execute<E: APIContract>() メソッドは APIExecutor から継承
 }
