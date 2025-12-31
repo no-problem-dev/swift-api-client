@@ -7,6 +7,22 @@
 
 ## [未リリース]
 
+## [1.0.9] - 2025-12-31
+
+### 追加
+- **APIContract 統合**
+  - `swift-api-contract` 1.0.0 を依存に追加（`.upToNextMajor`）
+  - `APIClient` プロトコルが `APIExecutor` を継承
+  - `execute<E: APIContract>()` メソッドを `APIClientImpl` に実装
+  - `@_exported import` で利用側が `APIContract` を直接使用可能に
+
+### 変更
+- `HTTPMethod` の重複定義を削除（`APIContract` のものを使用）
+
+### 破壊的変更
+- `HTTPMethod` は `APIContract` モジュールからインポートされる形に変更
+  - 既存コードは `import APIClient` のみで動作（`@_exported` により自動インポート）
+
 ## [1.0.8] - 2025-12-05
 
 ### 変更
@@ -117,7 +133,8 @@
 - HTTP ロギング機能
 - iOS 17.0+ および macOS 14.0+ サポート
 
-[未リリース]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.8...HEAD
+[未リリース]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.9...HEAD
+[1.0.9]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.8...v1.0.9
 [1.0.8]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.7...v1.0.8
 [1.0.7]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.6...v1.0.7
 [1.0.6]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.5...v1.0.6
