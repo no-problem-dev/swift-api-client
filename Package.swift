@@ -15,12 +15,15 @@ let package = Package(
             targets: ["APIClient"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/swiftlang/swift-docc-plugin", from: "1.4.0")
+        .package(url: "https://github.com/swiftlang/swift-docc-plugin", from: "1.4.0"),
+        .package(url: "https://github.com/no-problem-dev/swift-api-contract", .upToNextMajor(from: "1.0.0"))
     ],
     targets: [
         .target(
             name: "APIClient",
-            dependencies: []
+            dependencies: [
+                .product(name: "APIContract", package: "swift-api-contract")
+            ]
         ),
         .testTarget(
             name: "APIClientTests",

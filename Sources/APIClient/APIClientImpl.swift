@@ -1,3 +1,4 @@
+import APIContract
 import Foundation
 
 /// APIクライアントの実装
@@ -81,6 +82,45 @@ public struct APIClientImpl: APIClient {
 
     public func request(_ endpoint: APIEndpoint) async throws {
         _ = try await performRequest(endpoint)
+    }
+
+    // MARK: - APIContract Execution
+
+    public func execute<E: APIContract>(_ contract: E) async throws -> E.Output
+        where E.Input == E, E: APIInput
+    {
+        let endpoint = try makeEndpoint(from: contract)
+        return try await request(endpoint)
+    }
+
+    public func execute<E: APIContract>(_ contract: E) async throws
+        where E.Input == E, E.Output == EmptyOutput, E: APIInput
+    {
+        let endpoint = try makeEndpoint(from: contract)
+        try await request(endpoint)
+    }
+
+    /// APIContractをAPIEndpointに変換
+    private func makeEndpoint<E: APIContract>(from contract: E) throws -> APIEndpoint
+        where E.Input == E, E: APIInput
+    {
+        let path = E.resolvePath(with: contract)
+
+        let queryItems: [URLQueryItem]?
+        if let params = contract.queryParameters, !params.isEmpty {
+            queryItems = params.map { URLQueryItem(name: $0.key, value: $0.value) }
+        } else {
+            queryItems = nil
+        }
+
+        let body = try contract.encodeBody(using: encoder)
+
+        return APIEndpoint(
+            path: path,
+            method: E.method,
+            body: body,
+            queryItems: queryItems
+        )
     }
 
     private func performRequest(_ endpoint: APIEndpoint) async throws -> Data {
