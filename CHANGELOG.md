@@ -7,6 +7,20 @@
 
 ## [未リリース]
 
+## [1.0.11] - 2026-01-03
+
+### 変更
+- **APIExecutable 統合**
+  - `APIClient` プロトコルが `APIExecutable` を継承
+  - `request()` メソッド削除（`execute()` のみに統一）
+  - `HTTPMethod` → `APIMethod` に統一（api-contract 対応）
+- Swift 6.2 に更新
+- 不要なコメント・MARK を削除
+
+### 破壊的変更
+- `request()` メソッドは削除されました
+  - 代わりに `execute()` を使用してください
+
 ## [1.0.10] - 2026-01-01
 
 ### 変更
@@ -138,7 +152,8 @@
 - HTTP ロギング機能
 - iOS 17.0+ および macOS 14.0+ サポート
 
-[未リリース]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.10...HEAD
+[未リリース]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.11...HEAD
+[1.0.11]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.10...v1.0.11
 [1.0.10]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.9...v1.0.10
 [1.0.9]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.8...v1.0.9
 [1.0.8]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.7...v1.0.8
@@ -159,3 +174,5 @@
 <!-- Auto-generated on 2025-12-04T23:24:03Z by release workflow -->
 
 <!-- Auto-generated on 2025-12-31T03:17:18Z by release workflow -->
+
+<!-- Auto-generated on 2026-01-01T05:56:21Z by release workflow -->
