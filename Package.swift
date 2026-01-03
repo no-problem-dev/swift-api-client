@@ -1,5 +1,4 @@
-// swift-tools-version: 6.0
-// The swift-tools-version declares the minimum version of Swift required to build this package.
+// swift-tools-version: 6.2
 
 import PackageDescription
 
@@ -15,7 +14,7 @@ let package = Package(
             targets: ["APIClient"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/swiftlang/swift-docc-plugin", from: "1.4.0"),
+        .package(url: "https://github.com/swiftlang/swift-docc-plugin", .upToNextMajor(from: "1.4.0")),
         .package(url: "https://github.com/no-problem-dev/swift-api-contract", .upToNextMajor(from: "1.0.0"))
     ],
     targets: [
