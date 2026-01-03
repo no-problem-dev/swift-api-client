@@ -1,7 +1,7 @@
 import APIContract
 import Foundation
 
-/// APIクライアントの実装
+/// APIクライアント実装
 public struct APIClientImpl: APIClient {
     private let baseURL: URL
     private let session: URLSession
@@ -17,17 +17,6 @@ public struct APIClientImpl: APIClient {
     public let logs: AsyncStream<HTTPLog>
     private let logContinuation: AsyncStream<HTTPLog>.Continuation
 
-    /// 初期化
-    ///
-    /// - Parameters:
-    ///   - baseURL: APIのベースURL
-    ///   - session: URLSession
-    ///   - authTokenProvider: 認証トークンプロバイダー
-    ///   - timeout: タイムアウト時間（秒）
-    ///   - defaultHeaders: デフォルトヘッダー
-    ///   - keyDecodingStrategy: JSONキーのデコーディング戦略（デフォルト: .useDefaultKeys）
-    ///   - dateEncodingStrategy: 日付のエンコーディング戦略（デフォルト: RFC3339）
-    ///   - dateDecodingStrategy: 日付のデコーディング戦略（デフォルト: RFC3339フォールバック付き）
     public init(
         baseURL: URL,
         session: URLSession = .shared,
@@ -44,18 +33,15 @@ public struct APIClientImpl: APIClient {
         self.timeout = timeout
         self.defaultHeaders = defaultHeaders
 
-        // Encoder の設定
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = dateEncodingStrategy ?? Self.defaultDateEncodingStrategy()
         self.encoder = encoder
 
-        // Decoder の設定
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = keyDecodingStrategy
         decoder.dateDecodingStrategy = dateDecodingStrategy ?? Self.defaultDateDecodingStrategy()
         self.decoder = decoder
 
-        // AsyncStream の初期化
         (self.events, self.eventContinuation) = AsyncStream.makeStream(of: HTTPEvent.self, bufferingPolicy: .unbounded)
         (self.logs, self.logContinuation) = AsyncStream.makeStream(of: HTTPLog.self, bufferingPolicy: .unbounded)
     }
@@ -64,43 +50,32 @@ public struct APIClientImpl: APIClient {
         try encoder.encode(value)
     }
 
-    public func request<T: Decodable>(_ endpoint: APIEndpoint) async throws -> T {
+    public func execute<E: APIContract>(_ contract: E) async throws -> E.Output
+        where E.Input == E, E: APIInput
+    {
+        let endpoint = try makeEndpoint(from: contract)
         let data = try await performRequest(endpoint)
 
         do {
-            return try decoder.decode(T.self, from: data)
+            return try decoder.decode(E.Output.self, from: data)
         } catch {
             logContinuation.yield(.decodingError(
                 endpoint: endpoint,
                 error: String(describing: error),
                 data: data,
-                targetType: String(describing: T.self)
+                targetType: String(describing: E.Output.self)
             ))
             throw APIError.decodingError(error)
         }
-    }
-
-    public func request(_ endpoint: APIEndpoint) async throws {
-        _ = try await performRequest(endpoint)
-    }
-
-    // MARK: - APIContract Execution
-
-    public func execute<E: APIContract>(_ contract: E) async throws -> E.Output
-        where E.Input == E, E: APIInput
-    {
-        let endpoint = try makeEndpoint(from: contract)
-        return try await request(endpoint)
     }
 
     public func execute<E: APIContract>(_ contract: E) async throws
         where E.Input == E, E.Output == EmptyOutput, E: APIInput
     {
         let endpoint = try makeEndpoint(from: contract)
-        try await request(endpoint)
+        _ = try await performRequest(endpoint)
     }
 
-    /// APIContractをAPIEndpointに変換
     private func makeEndpoint<E: APIContract>(from contract: E) throws -> APIEndpoint
         where E.Input == E, E: APIInput
     {
@@ -138,21 +113,17 @@ public struct APIClientImpl: APIClient {
         request.httpBody = endpoint.body
         request.timeoutInterval = timeout
 
-        // デフォルトヘッダー
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
-        // Configuration のデフォルトヘッダーを適用
         defaultHeaders.forEach { key, value in
             request.setValue(value, forHTTPHeaderField: key)
         }
 
-        // 認証トークンを追加
         if let token = try await authTokenProvider?.getToken() {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
-        // エンドポイント固有のカスタムヘッダー（上書き可能）
         endpoint.headers?.forEach { key, value in
             request.setValue(value, forHTTPHeaderField: key)
         }
@@ -207,27 +178,16 @@ public struct APIClientImpl: APIClient {
             throw APIError.networkError(error)
         }
     }
-}
 
-/// 空のレスポンス型
-public struct EmptyResponse: Sendable, Codable {
-    public init() {}
-}
-
-// MARK: - HTTP Header Parsing
-extension APIClientImpl {
-    /// Retry-Afterヘッダーから待機時間を解析
     static func parseRetryAfter(from response: HTTPURLResponse) -> TimeInterval? {
         guard let retryAfterValue = response.value(forHTTPHeaderField: "Retry-After") else {
             return nil
         }
 
-        // 秒数として解析を試みる
         if let seconds = TimeInterval(retryAfterValue) {
             return seconds
         }
 
-        // HTTP-date形式として解析を試みる
         let formatter = DateFormatter()
         formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -238,10 +198,7 @@ extension APIClientImpl {
 
         return nil
     }
-}
 
-// MARK: - Date Encoding/Decoding Strategies
-extension APIClientImpl {
     static func defaultDateEncodingStrategy() -> JSONEncoder.DateEncodingStrategy {
         .custom { date, encoder in
             let formatter = ISO8601DateFormatter()
@@ -279,7 +236,7 @@ extension APIClientImpl {
 
             throw DecodingError.dataCorruptedError(
                 in: container,
-                debugDescription: "Invalid date format: \(dateString). Expected RFC3339 (e.g., '2024-01-15T10:30:00Z') or date-only (e.g., '2024-01-15')"
+                debugDescription: "Invalid date format: \(dateString)"
             )
         }
     }
