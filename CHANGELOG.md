@@ -7,6 +7,21 @@
 
 ## [未リリース]
 
+## [1.0.13] - 2026-01-11
+
+### 追加
+
+- **SSEストリーミングクライアント**: Server-Sent Events (SSE) クライアント実装
+  - `SSEEvent`: SSEイベント構造体（data, event, id, retry フィールド）
+  - `SSEClient`: SSEストリーミング操作プロトコル
+  - `SSEClientImpl`: URLSessionベースのSSEクライアント実装（自動再接続対応）
+  - `SSEClient+StreamingAPI`: `StreamingAPIContract` との連携拡張
+
+### テスト
+
+- SSEイベントパーシングのテストを追加
+- SSEクライアント機能のテストを追加
+
 ## [1.0.12] - 2026-01-03
 
 ### 追加
@@ -157,7 +172,8 @@
 - HTTP ロギング機能
 - iOS 17.0+ および macOS 14.0+ サポート
 
-[未リリース]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.12...HEAD
+[未リリース]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.13...HEAD
+[1.0.13]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.12...v1.0.13
 [1.0.12]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.11...v1.0.12
 [1.0.11]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.10...v1.0.11
 [1.0.10]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.9...v1.0.10
@@ -184,3 +200,5 @@
 <!-- Auto-generated on 2026-01-01T05:56:21Z by release workflow -->
 
 <!-- Auto-generated on 2026-01-03T00:13:58Z by release workflow -->
+
+<!-- Auto-generated on 2026-01-03T01:21:12Z by release workflow -->
