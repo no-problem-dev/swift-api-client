@@ -331,7 +331,7 @@ struct MockAuthTokenProvider: AuthTokenProvider {
 
 enum TestAPIGroup: APIContractGroup {
     static let basePath: String = "/v1"
-    static let auth: AuthRequirement = .required
+    static let auth: AuthScheme = .bearer
     static let endpoints: [EndpointDescriptor] = []
 }
 
@@ -764,6 +764,387 @@ final class APIClientImplTests: XCTestCase {
         let decoded = try JSONDecoder().decode(TestData.self, from: encoded)
         XCTAssertEqual(decoded.name, "test")
         XCTAssertEqual(decoded.value, 42)
+    }
+
+    // MARK: - executeWithResponse Tests
+
+    func testExecuteWithResponseReturnsStatusCodeAndHeaders() async throws {
+        let responseData = """
+        {"id": 1, "name": "User"}
+        """.data(using: .utf8)!
+
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["X-Request-Id": "abc-123", "X-RateLimit-Remaining": "99"]
+            )!
+            return (response, responseData)
+        }
+
+        let contract = TestContract()
+        let response: APIResponse<TestResponse> = try await client.executeWithResponse(contract)
+
+        XCTAssertEqual(response.output.id, 1)
+        XCTAssertEqual(response.output.name, "User")
+        XCTAssertEqual(response.statusCode, 200)
+        XCTAssertEqual(response.header("x-request-id"), "abc-123")
+        XCTAssertEqual(response.header("x-ratelimit-remaining"), "99")
+    }
+
+    // MARK: - AuthScheme Tests
+
+    func testAPIKeyAuthScheme() async throws {
+        let clientWithApiKey = APIClientImpl(
+            baseURL: URL(string: "https://api.example.com")!,
+            session: session,
+            authTokenProvider: MockAuthTokenProvider(token: "my-api-key")
+        )
+
+        let responseData = """
+        {"id": 1, "name": "User"}
+        """.data(using: .utf8)!
+
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-api-key"), "my-api-key")
+            XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, responseData)
+        }
+
+        let contract = APIKeyContract()
+        let _: TestResponse = try await clientWithApiKey.execute(contract)
+    }
+
+    func testNoAuthScheme() async throws {
+        let clientWithAuth = APIClientImpl(
+            baseURL: URL(string: "https://api.example.com")!,
+            session: session,
+            authTokenProvider: MockAuthTokenProvider(token: "should-not-appear")
+        )
+
+        let responseData = """
+        {"id": 1, "name": "User"}
+        """.data(using: .utf8)!
+
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+            XCTAssertNil(request.value(forHTTPHeaderField: "x-api-key"))
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, responseData)
+        }
+
+        let contract = NoAuthContract()
+        let _: TestResponse = try await clientWithAuth.execute(contract)
+    }
+
+    // MARK: - Group Headers Tests
+
+    func testGroupCommonHeadersAreApplied() async throws {
+        let responseData = """
+        {"id": 1, "name": "User"}
+        """.data(using: .utf8)!
+
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "anthropic-version"), "2023-06-01")
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, responseData)
+        }
+
+        let clientWithApiKey = APIClientImpl(
+            baseURL: URL(string: "https://api.anthropic.com")!,
+            session: session,
+            authTokenProvider: MockAuthTokenProvider(token: "sk-test")
+        )
+
+        let contract = APIKeyContract()
+        let _: TestResponse = try await clientWithApiKey.execute(contract)
+    }
+
+    func testEndpointAdditionalHeadersAreApplied() async throws {
+        let responseData = """
+        {"id": 1, "name": "User"}
+        """.data(using: .utf8)!
+
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "anthropic-version"), "2023-06-01")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "anthropic-beta"), "structured-outputs")
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, responseData)
+        }
+
+        let clientWithApiKey = APIClientImpl(
+            baseURL: URL(string: "https://api.anthropic.com")!,
+            session: session,
+            authTokenProvider: MockAuthTokenProvider(token: "sk-test")
+        )
+
+        let contract = HeaderedContract(betaHeader: "structured-outputs")
+        let _: TestResponse = try await clientWithApiKey.execute(contract)
+    }
+
+    // MARK: - Custom Error Decoding Tests
+
+    func testCustomErrorDecoding() async throws {
+        let errorData = """
+        {"error": {"type": "invalid_request_error", "message": "Bad request"}}
+        """.data(using: .utf8)!
+
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 400,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, errorData)
+        }
+
+        let clientWithApiKey = APIClientImpl(
+            baseURL: URL(string: "https://api.anthropic.com")!,
+            session: session,
+            authTokenProvider: MockAuthTokenProvider(token: "sk-test")
+        )
+
+        let contract = CustomErrorContract()
+
+        do {
+            let _: TestResponse = try await clientWithApiKey.execute(contract)
+            XCTFail("Expected error")
+        } catch let error as CustomAPIError {
+            XCTAssertEqual(error.type, "invalid_request_error")
+            XCTAssertEqual(error.message, "Bad request")
+        }
+    }
+
+    // MARK: - RetryPolicy Tests
+
+    func testClientWithRetryPolicy() {
+        let clientWithRetry = APIClientImpl(
+            baseURL: URL(string: "https://api.example.com")!,
+            session: session,
+            retryPolicy: ExponentialBackoff(maxRetries: 3, baseDelay: 0.01)
+        )
+
+        XCTAssertNotNil(clientWithRetry)
+    }
+}
+
+// MARK: - Additional Test Contracts
+
+enum APIKeyTestGroup: APIContractGroup {
+    static let basePath: String = "/v1/messages"
+    static let auth: AuthScheme = .apiKey(headerName: "x-api-key")
+    static let commonHeaders: [String: String] = ["anthropic-version": "2023-06-01"]
+    static let endpoints: [EndpointDescriptor] = []
+}
+
+enum NoAuthGroup: APIContractGroup {
+    static let basePath: String = "/public"
+    static let auth: AuthScheme = .none
+    static let endpoints: [EndpointDescriptor] = []
+}
+
+struct APIKeyContract: APIContract, APIInput {
+    typealias Group = APIKeyTestGroup
+    typealias Input = Self
+    typealias Output = TestResponse
+
+    static let method: APIMethod = .get
+    static let subPath: String = ""
+
+    var pathParameters: [String: String] { [:] }
+    var queryParameters: [String: String]? { nil }
+
+    func encodeBody(using encoder: JSONEncoder) throws -> Data? { nil }
+
+    static func decode(
+        pathParameters: [String: String],
+        queryParameters: [String: String],
+        body: Data?,
+        decoder: JSONDecoder
+    ) throws -> Self { Self() }
+}
+
+struct NoAuthContract: APIContract, APIInput {
+    typealias Group = NoAuthGroup
+    typealias Input = Self
+    typealias Output = TestResponse
+
+    static let method: APIMethod = .get
+    static let subPath: String = "/data"
+
+    var pathParameters: [String: String] { [:] }
+    var queryParameters: [String: String]? { nil }
+
+    func encodeBody(using encoder: JSONEncoder) throws -> Data? { nil }
+
+    static func decode(
+        pathParameters: [String: String],
+        queryParameters: [String: String],
+        body: Data?,
+        decoder: JSONDecoder
+    ) throws -> Self { Self() }
+}
+
+struct HeaderedContract: APIContract, APIInput {
+    typealias Group = APIKeyTestGroup
+    typealias Input = Self
+    typealias Output = TestResponse
+
+    static let method: APIMethod = .post
+    static let subPath: String = ""
+
+    let betaHeader: String?
+
+    var pathParameters: [String: String] { [:] }
+    var queryParameters: [String: String]? { nil }
+    var additionalHeaders: [String: String] {
+        var headers: [String: String] = [:]
+        if let betaHeader {
+            headers["anthropic-beta"] = betaHeader
+        }
+        return headers
+    }
+
+    func encodeBody(using encoder: JSONEncoder) throws -> Data? { nil }
+
+    static func decode(
+        pathParameters: [String: String],
+        queryParameters: [String: String],
+        body: Data?,
+        decoder: JSONDecoder
+    ) throws -> Self { Self(betaHeader: nil) }
+}
+
+/// Custom error for testing decodeError
+struct CustomAPIError: Error {
+    let type: String
+    let message: String
+}
+
+enum CustomErrorGroup: APIContractGroup {
+    static let basePath: String = "/v1"
+    static let auth: AuthScheme = .apiKey(headerName: "x-api-key")
+    static let endpoints: [EndpointDescriptor] = []
+
+    static func decodeError(statusCode: Int, data: Data, headers: [String: String], decoder: JSONDecoder) -> (any Error)? {
+        struct ErrorBody: Decodable {
+            let error: ErrorDetail
+            struct ErrorDetail: Decodable {
+                let type: String
+                let message: String
+            }
+        }
+        guard let body = try? decoder.decode(ErrorBody.self, from: data) else { return nil }
+        return CustomAPIError(type: body.error.type, message: body.error.message)
+    }
+}
+
+struct CustomErrorContract: APIContract, APIInput {
+    typealias Group = CustomErrorGroup
+    typealias Input = Self
+    typealias Output = TestResponse
+
+    static let method: APIMethod = .post
+    static let subPath: String = "/test"
+
+    var pathParameters: [String: String] { [:] }
+    var queryParameters: [String: String]? { nil }
+
+    func encodeBody(using encoder: JSONEncoder) throws -> Data? { nil }
+
+    static func decode(
+        pathParameters: [String: String],
+        queryParameters: [String: String],
+        body: Data?,
+        decoder: JSONDecoder
+    ) throws -> Self { Self() }
+}
+
+// MARK: - RetryPolicy Tests
+
+final class RetryPolicyTests: XCTestCase {
+
+    func testExponentialBackoffDefaults() {
+        let policy = ExponentialBackoff.default
+        XCTAssertEqual(policy.maxRetries, 3)
+        XCTAssertEqual(policy.baseDelay, 1.0)
+        XCTAssertEqual(policy.maxDelay, 60.0)
+    }
+
+    func testExponentialBackoffShouldRetry() {
+        let policy = ExponentialBackoff.default
+        XCTAssertTrue(policy.shouldRetry(statusCode: 429, attempt: 1))
+        XCTAssertTrue(policy.shouldRetry(statusCode: 500, attempt: 1))
+        XCTAssertTrue(policy.shouldRetry(statusCode: 502, attempt: 1))
+        XCTAssertTrue(policy.shouldRetry(statusCode: 503, attempt: 1))
+        XCTAssertTrue(policy.shouldRetry(statusCode: 504, attempt: 1))
+        XCTAssertFalse(policy.shouldRetry(statusCode: 400, attempt: 1))
+        XCTAssertFalse(policy.shouldRetry(statusCode: 401, attempt: 1))
+        XCTAssertFalse(policy.shouldRetry(statusCode: 404, attempt: 1))
+    }
+
+    func testExponentialBackoffRespectsMaxRetries() {
+        let policy = ExponentialBackoff(maxRetries: 2)
+        XCTAssertTrue(policy.shouldRetry(statusCode: 500, attempt: 1))
+        XCTAssertFalse(policy.shouldRetry(statusCode: 500, attempt: 2))
+        XCTAssertFalse(policy.shouldRetry(statusCode: 500, attempt: 3))
+    }
+
+    func testExponentialBackoffDelayIncreases() {
+        let policy = ExponentialBackoff(maxRetries: 5, baseDelay: 1.0, maxDelay: 60.0, jitter: 0.0)
+        let delay1 = policy.delay(for: 1, retryAfter: nil)
+        let delay2 = policy.delay(for: 2, retryAfter: nil)
+        let delay3 = policy.delay(for: 3, retryAfter: nil)
+
+        XCTAssertEqual(delay1, 1.0)
+        XCTAssertEqual(delay2, 2.0)
+        XCTAssertEqual(delay3, 4.0)
+    }
+
+    func testExponentialBackoffRespectsRetryAfter() {
+        let policy = ExponentialBackoff.default
+        let delay = policy.delay(for: 1, retryAfter: 30.0)
+        XCTAssertEqual(delay, 30.0)
+    }
+
+    func testExponentialBackoffRespectsMaxDelay() {
+        let policy = ExponentialBackoff(maxRetries: 10, baseDelay: 1.0, maxDelay: 10.0, jitter: 0.0)
+        let delay = policy.delay(for: 8, retryAfter: nil)
+        XCTAssertLessThanOrEqual(delay, 10.0)
+    }
+
+    func testNoRetryPolicy() {
+        let policy = NoRetry()
+        XCTAssertEqual(policy.maxRetries, 0)
+        XCTAssertFalse(policy.shouldRetry(statusCode: 500, attempt: 1))
+        XCTAssertEqual(policy.delay(for: 1, retryAfter: nil), 0)
     }
 }
 

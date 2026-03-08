@@ -7,15 +7,6 @@ extension SSEClientImpl: StreamingAPIExecutable {
     /// StreamingAPIContractを使用してSSEストリームを開始
     ///
     /// 型安全なストリーミングAPI実行。契約で定義されたEvent型に自動デコードされる。
-    ///
-    /// ## 使用例
-    /// ```swift
-    /// let client = SSEClientImpl(baseURL: baseURL)
-    /// let stream = client.execute(SearchAPI.StreamSearch(query: "ramen"))
-    /// for try await event in stream {
-    ///     // event は SearchEvent 型
-    /// }
-    /// ```
     public func execute<E: StreamingAPIContract>(
         _ contract: E
     ) -> AsyncThrowingStream<E.Event, Error> where E.Input == E, E: APIInput {
@@ -39,12 +30,15 @@ extension SSEClientImpl: StreamingAPIExecutable {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
-        // SSEEventストリームを取得（connectWithDataを使用して二重エンコードを回避）
+        // SSEEventストリームを取得（AuthScheme・ヘッダー付き）
         let sseStream = connectWithData(
             path: path,
             method: method,
             bodyData: bodyData,
-            queryItems: queryItems
+            queryItems: queryItems,
+            authScheme: E.auth,
+            groupHeaders: E.Group.commonHeaders,
+            endpointHeaders: contract.additionalHeaders
         )
 
         return AsyncThrowingStream { continuation in

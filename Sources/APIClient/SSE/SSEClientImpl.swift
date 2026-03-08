@@ -1,3 +1,4 @@
+import APIContract
 import Foundation
 
 /// Server-Sent Events (SSE) client implementation
@@ -58,6 +59,27 @@ public struct SSEClientImpl: SSEClient, Sendable {
         bodyData: Data?,
         queryItems: [URLQueryItem]?
     ) -> AsyncThrowingStream<SSEEvent, Error> {
+        connectWithData(
+            path: path,
+            method: method,
+            bodyData: bodyData,
+            queryItems: queryItems,
+            authScheme: .bearer,
+            groupHeaders: [:],
+            endpointHeaders: [:]
+        )
+    }
+
+    /// AuthScheme・ヘッダー付きSSE接続（StreamingAPIContract用）
+    internal func connectWithData(
+        path: String,
+        method: String,
+        bodyData: Data?,
+        queryItems: [URLQueryItem]?,
+        authScheme: AuthScheme,
+        groupHeaders: [String: String],
+        endpointHeaders: [String: String]
+    ) -> AsyncThrowingStream<SSEEvent, Error> {
         // Capture values before creating the stream
         let url = baseURL.appendingPathComponent(path)
         let session = self.session
@@ -71,7 +93,20 @@ public struct SSEClientImpl: SSEClient, Sendable {
                     guard var components = URLComponents(url: url, resolvingAgainstBaseURL: true) else {
                         throw SSEError.invalidURL
                     }
-                    components.queryItems = queryItems
+
+                    // AuthScheme.queryParam の場合、認証トークンをクエリに追加
+                    if case .queryParam(let name) = authScheme,
+                       let token = try await authTokenProvider?.getToken() {
+                        var items = components.queryItems ?? []
+                        items.append(URLQueryItem(name: name, value: token))
+                        components.queryItems = items
+                    }
+
+                    if let queryItems {
+                        var items = components.queryItems ?? []
+                        items.append(contentsOf: queryItems)
+                        components.queryItems = items
+                    }
 
                     guard let requestURL = components.url else {
                         throw SSEError.invalidURL
@@ -83,13 +118,34 @@ public struct SSEClientImpl: SSEClient, Sendable {
                     request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
                     request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
 
-                    // Add auth token
-                    if let token = try await authTokenProvider?.getToken() {
-                        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-                    }
-
                     // Add default headers
                     for (key, value) in defaultHeaders {
+                        request.setValue(value, forHTTPHeaderField: key)
+                    }
+
+                    // Auth based on AuthScheme
+                    switch authScheme {
+                    case .none:
+                        break
+                    case .bearer:
+                        if let token = try await authTokenProvider?.getToken() {
+                            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                        }
+                    case .apiKey(let headerName):
+                        if let token = try await authTokenProvider?.getToken() {
+                            request.setValue(token, forHTTPHeaderField: headerName)
+                        }
+                    case .queryParam:
+                        break // Already handled above
+                    }
+
+                    // Group common headers
+                    for (key, value) in groupHeaders {
+                        request.setValue(value, forHTTPHeaderField: key)
+                    }
+
+                    // Endpoint-specific headers
+                    for (key, value) in endpointHeaders {
                         request.setValue(value, forHTTPHeaderField: key)
                     }
 
