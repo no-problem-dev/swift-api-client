@@ -1,6 +1,12 @@
 import APIContract
 import Foundation
 
+// SSEClientImpl uses URLSession.AsyncBytes (session.bytes(for:)), which is
+// only available on Darwin platforms. On Linux (e.g. Cloud Run server builds),
+// this type is conditionally compiled out — server code uses HTTPStreamingClient
+// from swift-llm-cloud instead.
+#if canImport(Darwin)
+
 /// Server-Sent Events (SSE) client implementation
 ///
 /// Connects to SSE endpoints and streams events as they arrive.
@@ -318,6 +324,8 @@ public struct SSEClientImpl: SSEClient, Sendable {
         return SSEEvent(data: data, event: event, id: id, retry: retry)
     }
 }
+
+#endif // canImport(Darwin)
 
 // MARK: - Helper Types
 

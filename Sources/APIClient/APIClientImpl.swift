@@ -1,5 +1,8 @@
 import APIContract
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// APIクライアント実装
 public struct APIClientImpl: APIClient {
