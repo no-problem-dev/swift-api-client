@@ -1,6 +1,10 @@
 import Foundation
 import APIContract
 
+// SSEClientImpl is Darwin-only (see SSEClientImpl.swift) — this extension
+// follows the same compile guard so it only exists on Darwin.
+#if canImport(Darwin)
+
 // MARK: - StreamingAPIExecutable Implementation
 
 extension SSEClientImpl: StreamingAPIExecutable {
@@ -67,3 +71,5 @@ extension SSEClientImpl: StreamingAPIExecutable {
         }
     }
 }
+
+#endif // canImport(Darwin)
