@@ -7,6 +7,15 @@
 
 ## [未リリース]
 
+## [1.2.0] - 2026-04-18
+
+### 追加
+
+- **`keyEncodingStrategy` パラメータ**: `APIClientImpl.init` に `JSONEncoder.KeyEncodingStrategy` を指定可能に
+  - デフォルト `.useDefaultKeys` で後方互換
+  - `.convertToSnakeCase` を指定することで、camelCase の Swift フィールドを snake_case JSON キーへ自動変換し、`keyDecodingStrategy: .convertFromSnakeCase` と対称な encode / decode を実現
+  - これにより Codable 側で `case foo = "foo_bar"` のような明示マッピングが不要になり、命名戦略を 1 箇所（クライアント生成時）で決定できる
+
 ## [1.0.13] - 2026-01-11
 
 ### 追加

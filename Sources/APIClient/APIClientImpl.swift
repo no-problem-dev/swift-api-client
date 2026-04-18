@@ -29,6 +29,7 @@ public struct APIClientImpl: APIClient {
         defaultHeaders: [String: String] = [:],
         retryPolicy: RetryPolicy = NoRetry(),
         keyDecodingStrategy: JSONDecoder.KeyDecodingStrategy = .useDefaultKeys,
+        keyEncodingStrategy: JSONEncoder.KeyEncodingStrategy = .useDefaultKeys,
         dateEncodingStrategy: JSONEncoder.DateEncodingStrategy? = nil,
         dateDecodingStrategy: JSONDecoder.DateDecodingStrategy? = nil
     ) {
@@ -40,6 +41,7 @@ public struct APIClientImpl: APIClient {
         self.retryPolicy = retryPolicy
 
         let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = keyEncodingStrategy
         encoder.dateEncodingStrategy = dateEncodingStrategy ?? Self.defaultDateEncodingStrategy()
         self.encoder = encoder
 

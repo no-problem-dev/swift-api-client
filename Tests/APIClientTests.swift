@@ -766,6 +766,32 @@ final class APIClientImplTests: XCTestCase {
         XCTAssertEqual(decoded.value, 42)
     }
 
+    func testEncodeWithConvertToSnakeCaseStrategy() throws {
+        // keyEncodingStrategy = .convertToSnakeCase を指定したクライアントは、
+        // camelCase の Swift フィールドを snake_case JSON キーへ自動変換する。
+        // これにより Codable 側は CodingKey への snake_case 明示マッピングを持たずに済み、
+        // keyDecodingStrategy = .convertFromSnakeCase と対称な挙動を取る。
+        let clientWithSnakeEncoder = APIClientImpl(
+            baseURL: URL(string: "https://example.com")!,
+            keyEncodingStrategy: .convertToSnakeCase
+        )
+
+        struct MealLog: Codable {
+            let mealType: String
+            let hungerVsCraving: String
+            let loggedAt: String
+        }
+
+        let encoded = try clientWithSnakeEncoder.encode(
+            MealLog(mealType: "breakfast", hungerVsCraving: "hunger", loggedAt: "2026-04-18T00:00:00Z")
+        )
+
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertEqual(json["meal_type"] as? String, "breakfast")
+        XCTAssertEqual(json["hunger_vs_craving"] as? String, "hunger")
+        XCTAssertEqual(json["logged_at"] as? String, "2026-04-18T00:00:00Z")
+    }
+
     // MARK: - executeWithResponse Tests
 
     func testExecuteWithResponseReturnsStatusCodeAndHeaders() async throws {
