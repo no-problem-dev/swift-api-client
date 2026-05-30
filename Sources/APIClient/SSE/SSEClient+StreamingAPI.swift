@@ -59,8 +59,9 @@ extension SSEClientImpl: StreamingAPIExecutable {
                             let event = try decoder.decode(E.Event.self, from: eventData)
                             continuation.yield(event)
                         } catch {
-                            // デコードエラーはログして続行
-                            print("⚠️ SSEClient: Failed to decode event: \(error)")
+                            // Unrecognized / non-JSON events (e.g. keep-alive comments)
+                            // are skipped rather than failing the whole stream.
+                            continue
                         }
                     }
                     continuation.finish()

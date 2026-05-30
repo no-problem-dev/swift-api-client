@@ -162,106 +162,73 @@ public struct SSEClientImpl: SSEClient, Sendable {
                     }
 
                     // Start streaming
-                    print("🌐 SSEClient: Starting request to \(requestURL)")
                     let (bytes, response) = try await session.bytes(for: request)
 
                     guard let httpResponse = response as? HTTPURLResponse else {
-                        print("❌ SSEClient: Invalid response type")
                         throw SSEError.invalidResponse
                     }
 
-                    print("🌐 SSEClient: Response status: \(httpResponse.statusCode)")
-
                     guard (200...299).contains(httpResponse.statusCode) else {
-                        print("❌ SSEClient: HTTP error \(httpResponse.statusCode)")
                         throw SSEError.httpError(statusCode: httpResponse.statusCode, data: nil)
                     }
 
-                    // Parse SSE events using lines
-                    // Note: bytes.lines skips empty lines, so we detect event boundaries
-                    // by checking for new "event:" or "data:" fields when we already have data
-                    var currentEvent: String?
-                    var currentData: String?
-                    var eventCount = 0
-                    var lineCount = 0
+                    // Parse the SSE stream per the WHATWG spec. We iterate raw
+                    // bytes (rather than `bytes.lines`) so that blank-line event
+                    // boundaries are preserved — these delimit data-only events,
+                    // which `.lines` would otherwise collapse together.
+                    var dataLines: [String] = []
+                    var eventType: String?
+                    var lineBytes: [UInt8] = []
 
-                    print("🌐 SSEClient: Starting to read line stream...")
-
-                    for try await line in bytes.lines {
-                        lineCount += 1
-                        print("🌐 SSEClient: Line #\(lineCount): \(line.prefix(80))...")
-
-                        // Skip comment lines
-                        if line.hasPrefix(":") {
-                            continue
+                    func dispatchEvent() {
+                        defer {
+                            dataLines.removeAll(keepingCapacity: true)
+                            eventType = nil
                         }
+                        guard !dataLines.isEmpty || eventType != nil else { return }
+                        let data = dataLines.isEmpty ? nil : dataLines.joined(separator: "\n")
+                        continuation.yield(SSEEvent(data: data, event: eventType))
+                    }
 
-                        // Parse field
+                    func handle(line: String) {
+                        // A blank line dispatches the buffered event.
+                        if line.isEmpty {
+                            dispatchEvent()
+                            return
+                        }
+                        // Comment lines start with ":".
+                        if line.hasPrefix(":") { return }
+
                         let parts = line.split(separator: ":", maxSplits: 1)
-                        guard let field = parts.first else { continue }
-                        let value = parts.count > 1
-                            ? String(parts[1]).trimmingCharacters(in: .init(charactersIn: " "))
-                            : ""
+                        guard let field = parts.first else { return }
+                        var value = parts.count > 1 ? String(parts[1]) : ""
+                        if value.hasPrefix(" ") { value.removeFirst() } // strip one leading space
 
-                        let fieldName = String(field)
-
-                        switch fieldName {
-                        case "event":
-                            // If we already have data, emit the previous event first
-                            if let data = currentData {
-                                let event = SSEEvent(data: data, event: currentEvent)
-                                eventCount += 1
-                                print("🌐 SSEClient: Emitting event #\(eventCount): \(event.event ?? "no-event")")
-                                continuation.yield(event)
-                            }
-                            // Start new event
-                            currentEvent = value
-                            currentData = nil
-
-                        case "data":
-                            // If we have an event type but encounter new data, check if this
-                            // is a continuation or a new event
-                            if currentData != nil && currentEvent != nil {
-                                // We have complete previous event, emit it
-                                let event = SSEEvent(data: currentData, event: currentEvent)
-                                eventCount += 1
-                                print("🌐 SSEClient: Emitting event #\(eventCount): \(event.event ?? "no-event")")
-                                continuation.yield(event)
-                                // Reset for new event
-                                currentEvent = nil
-                                currentData = value
-                            } else if currentData == nil {
-                                currentData = value
-                            } else {
-                                // Multiple data fields - concatenate with newline per spec
-                                currentData! += "\n" + value
-                            }
-
-                        case "id":
-                            // Handle id field if needed
-                            break
-
-                        case "retry":
-                            // Handle retry field if needed
-                            break
-
-                        default:
-                            break
+                        switch String(field) {
+                        case "data": dataLines.append(value)
+                        case "event": eventType = value
+                        default: break // "id" / "retry" are ignored here
                         }
                     }
 
-                    // Emit any remaining event
-                    if let data = currentData {
-                        let event = SSEEvent(data: data, event: currentEvent)
-                        eventCount += 1
-                        print("🌐 SSEClient: Emitting final event #\(eventCount): \(event.event ?? "no-event")")
-                        continuation.yield(event)
+                    for try await byte in bytes {
+                        if byte == 0x0A { // \n
+                            if lineBytes.last == 0x0D { lineBytes.removeLast() } // strip trailing \r
+                            handle(line: String(decoding: lineBytes, as: UTF8.self))
+                            lineBytes.removeAll(keepingCapacity: true)
+                        } else {
+                            lineBytes.append(byte)
+                        }
                     }
 
-                    print("🌐 SSEClient: Stream finished, total lines: \(lineCount), total events: \(eventCount)")
+                    // Flush a trailing partial line and any pending event.
+                    if !lineBytes.isEmpty {
+                        if lineBytes.last == 0x0D { lineBytes.removeLast() }
+                        handle(line: String(decoding: lineBytes, as: UTF8.self))
+                    }
+                    dispatchEvent()
                     continuation.finish()
                 } catch {
-                    print("❌ SSEClient: Error: \(error)")
                     continuation.finish(throwing: error)
                 }
             }
