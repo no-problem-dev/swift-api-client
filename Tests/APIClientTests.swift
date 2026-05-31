@@ -252,4 +252,20 @@ final class APIClientImplTests: XCTestCase {
         XCTAssertEqual(deltas, ["a", "b"])
         XCTAssertEqual(mock.recordedRequests.first?.headers["accept"], "text/event-stream")
     }
+
+    func testEventStreamPreservesEventNames() async throws {
+        let sse = "event: start\ndata: {\"x\":1}\n\nevent: delta\ndata: hello\n\n"
+        let mock = MockTransport(streamChunks: [Data(sse.utf8)])
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
+        var events: [(String?, String)] = []
+        for try await sse in client.executeEventStream(GetContract()) {
+            events.append((sse.event, sse.data))
+        }
+        XCTAssertEqual(events.count, 2)
+        XCTAssertEqual(events[0].0, "start")
+        XCTAssertEqual(events[0].1, "{\"x\":1}")
+        XCTAssertEqual(events[1].0, "delta")
+        XCTAssertEqual(events[1].1, "hello")
+        XCTAssertEqual(mock.recordedRequests.first?.headers["accept"], "text/event-stream")
+    }
 }

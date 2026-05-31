@@ -114,6 +114,43 @@ public struct APIClientImpl: APIClient {
         }
     }
 
+    /// 生の ``SSEEvent``(イベント名 + データ)をそのまま流す。Anthropic のように
+    /// 複数イベント型 + 状態蓄積を伴うストリームは、型付き ``execute`` ではなくこちらを使い、
+    /// プロバイダ側の accumulator で解釈する。非 2xx は group の `decodeError` でマップする。
+    public func executeEventStream<E: APIContract>(_ contract: E) -> AsyncThrowingStream<SSEEvent, Error>
+        where E.Input == E, E: APIInput
+    {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let request = try await buildRequest(
+                        method: E.method.rawValue,
+                        path: E.resolvePath(with: contract),
+                        queryParameters: contract.queryParameters,
+                        body: try contract.encodeBody(using: bodyEncoder),
+                        authScheme: E.auth,
+                        groupHeaders: E.Group.commonHeaders,
+                        endpointHeaders: contract.additionalHeaders,
+                        accept: "text/event-stream"
+                    )
+                    for try await sse in transport.sseEvents(request) {
+                        continuation.yield(sse)
+                    }
+                    continuation.finish()
+                } catch let error as HTTPStatusError {
+                    let mapped = E.Group.decodeError(
+                        statusCode: error.status, data: error.body,
+                        headers: dictionary(error.headers), decoder: bodyDecoder
+                    ) ?? mapToAPIError(statusCode: error.status, data: error.body)
+                    continuation.finish(throwing: mapped)
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     // MARK: - Request building
 
     private func buildRequest(
