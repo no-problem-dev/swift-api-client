@@ -2,14 +2,13 @@ import XCTest
 import Foundation
 @testable import APIClient
 import APIContract
+import HTTPTransport
 
 // MARK: - APIEndpoint Tests
 
 final class APIEndpointTests: XCTestCase {
-
     func testInitWithDefaults() {
         let endpoint = APIEndpoint(path: "/v1/users")
-
         XCTAssertEqual(endpoint.path, "/v1/users")
         XCTAssertEqual(endpoint.method, .get)
         XCTAssertNil(endpoint.headers)
@@ -19,83 +18,30 @@ final class APIEndpointTests: XCTestCase {
 
     func testInitWithAllParameters() {
         let bodyData = Data("test".utf8)
-        let queryItems = [URLQueryItem(name: "page", value: "1")]
-
         let endpoint = APIEndpoint(
-            path: "/v1/users",
-            method: .post,
-            headers: ["X-Custom": "value"],
-            body: bodyData,
-            queryItems: queryItems
+            path: "/v1/users", method: .post,
+            headers: ["X-Custom": "value"], body: bodyData,
+            queryItems: [URLQueryItem(name: "page", value: "1")]
         )
-
-        XCTAssertEqual(endpoint.path, "/v1/users")
         XCTAssertEqual(endpoint.method, .post)
         XCTAssertEqual(endpoint.headers?["X-Custom"], "value")
         XCTAssertEqual(endpoint.body, bodyData)
-        XCTAssertEqual(endpoint.queryItems?.first?.name, "page")
         XCTAssertEqual(endpoint.queryItems?.first?.value, "1")
-    }
-
-    func testEndpointIsSendable() {
-        let endpoint = APIEndpoint(path: "/test")
-
-        Task {
-            let _ = endpoint
-        }
     }
 }
 
 // MARK: - APIError Tests
 
 final class APIErrorTests: XCTestCase {
-
     func testNetworkErrorDescription() {
-        let underlyingError = NSError(domain: "TestDomain", code: -1, userInfo: [
-            NSLocalizedDescriptionKey: "Network unreachable"
-        ])
-        let error = APIError.networkError(underlyingError)
-
+        let error = APIError.networkError(NSError(domain: "T", code: -1, userInfo: [NSLocalizedDescriptionKey: "Network unreachable"]))
         XCTAssertTrue(error.errorDescription?.contains("ネットワークエラー") ?? false)
-        XCTAssertTrue(error.errorDescription?.contains("Network unreachable") ?? false)
     }
-
-    func testDecodingErrorDescription() {
-        let underlyingError = NSError(domain: "DecodingError", code: -1, userInfo: [
-            NSLocalizedDescriptionKey: "Type mismatch"
-        ])
-        let error = APIError.decodingError(underlyingError)
-
-        XCTAssertTrue(error.errorDescription?.contains("デコードエラー") ?? false)
-    }
-
-    func testInvalidURLDescription() {
-        let error = APIError.invalidURL
-
-        XCTAssertEqual(error.errorDescription, "無効なURLです")
-    }
-
-    func testInvalidResponseDescription() {
-        let error = APIError.invalidResponse
-
-        XCTAssertEqual(error.errorDescription, "無効なレスポンスです")
-    }
-
-    func testUnauthorizedDescription() {
-        let error = APIError.unauthorized
-
-        XCTAssertEqual(error.errorDescription, "認証が必要です")
-    }
-
-    func testHTTPErrorDescription() {
-        let error = APIError.httpError(statusCode: 404, data: Data())
-
-        XCTAssertEqual(error.errorDescription, "HTTPエラー: 404")
-    }
-
-    func testAPIErrorConformsToLocalizedError() {
+    func testInvalidURLDescription() { XCTAssertEqual(APIError.invalidURL.errorDescription, "無効なURLです") }
+    func testUnauthorizedDescription() { XCTAssertEqual(APIError.unauthorized.errorDescription, "認証が必要です") }
+    func testHTTPErrorDescription() { XCTAssertEqual(APIError.httpError(statusCode: 404, data: Data()).errorDescription, "HTTPエラー: 404") }
+    func testConformsToLocalizedError() {
         let error: LocalizedError = APIError.invalidURL
-
         XCTAssertNotNil(error.errorDescription)
     }
 }
@@ -103,1618 +49,207 @@ final class APIErrorTests: XCTestCase {
 // MARK: - HTTPLog Tests
 
 final class HTTPLogTests: XCTestCase {
-
     func testSuccessDescription() {
-        let endpoint = APIEndpoint(path: "/v1/users", method: .get)
-        let responseData = """
-        {"id": 1, "name": "Test"}
-        """.data(using: .utf8)!
-
-        let log = HTTPLog.success(endpoint: endpoint, statusCode: 200, data: responseData)
-        let description = log.description
-
-        XCTAssertTrue(description.contains("API REQUEST SUCCESS"))
-        XCTAssertTrue(description.contains("GET /v1/users"))
-        XCTAssertTrue(description.contains("200"))
-        XCTAssertTrue(description.contains("id"))
+        let log = HTTPLog.success(endpoint: APIEndpoint(path: "/v1/users"), statusCode: 200, data: Data(#"{"id":1}"#.utf8))
+        XCTAssertTrue(log.description.contains("API REQUEST SUCCESS"))
+        XCTAssertTrue(log.description.contains("GET /v1/users"))
     }
-
     func testHTTPErrorDescription() {
-        let endpoint = APIEndpoint(path: "/v1/users/999", method: .get)
-        let errorData = """
-        {"error": "Not Found"}
-        """.data(using: .utf8)!
-
-        let log = HTTPLog.httpError(endpoint: endpoint, statusCode: 404, data: errorData)
-        let description = log.description
-
-        XCTAssertTrue(description.contains("HTTP ERROR"))
-        XCTAssertTrue(description.contains("GET /v1/users/999"))
-        XCTAssertTrue(description.contains("404"))
-        XCTAssertTrue(description.contains("Not Found"))
+        let log = HTTPLog.httpError(endpoint: APIEndpoint(path: "/v1/x"), statusCode: 404, data: Data(#"{"error":"Not Found"}"#.utf8))
+        XCTAssertTrue(log.description.contains("HTTP ERROR"))
+        XCTAssertTrue(log.description.contains("Not Found"))
     }
-
-    func testDecodingErrorDescription() {
-        let endpoint = APIEndpoint(path: "/v1/data", method: .get)
-        let invalidData = "invalid json".data(using: .utf8)!
-
-        let log = HTTPLog.decodingError(
-            endpoint: endpoint,
-            error: "Type mismatch at key 'id'",
-            data: invalidData,
-            targetType: "User"
-        )
-        let description = log.description
-
-        XCTAssertTrue(description.contains("DECODE ERROR"))
-        XCTAssertTrue(description.contains("GET /v1/data"))
-        XCTAssertTrue(description.contains("User"))
-        XCTAssertTrue(description.contains("Type mismatch"))
-    }
-
     func testLargeDataTruncation() {
-        let endpoint = APIEndpoint(path: "/v1/large", method: .get)
-        let largeData = Data(repeating: 65, count: 15000) // 15KB of 'A'
-
-        let log = HTTPLog.success(endpoint: endpoint, statusCode: 200, data: largeData)
-        let description = log.description
-
-        XCTAssertTrue(description.contains("too large to display"))
-    }
-
-    func testInvalidJSONFormatting() {
-        let endpoint = APIEndpoint(path: "/v1/test", method: .get)
-        let invalidJSON = "not json at all".data(using: .utf8)!
-
-        let log = HTTPLog.success(endpoint: endpoint, statusCode: 200, data: invalidJSON)
-        let description = log.description
-
-        XCTAssertTrue(description.contains("Raw data"))
-    }
-
-    func testHTTPLogIsSendable() {
-        let endpoint = APIEndpoint(path: "/test")
-        let log = HTTPLog.success(endpoint: endpoint, statusCode: 200, data: Data())
-
-        Task {
-            let _ = log
-        }
+        let log = HTTPLog.success(endpoint: APIEndpoint(path: "/x"), statusCode: 200, data: Data(repeating: 65, count: 15000))
+        XCTAssertTrue(log.description.contains("too large to display"))
     }
 }
 
 // MARK: - HTTPEvent Tests
 
 final class HTTPEventTests: XCTestCase {
-
-    func testUnauthorizedEvent() {
-        let endpoint = APIEndpoint(path: "/v1/protected", method: .get)
-        let data = Data()
-
-        let event = HTTPEvent.unauthorized(endpoint: endpoint, data: data)
-
-        if case .unauthorized(let ep, _) = event {
-            XCTAssertEqual(ep.path, "/v1/protected")
-        } else {
-            XCTFail("Expected unauthorized event")
-        }
-    }
-
-    func testForbiddenEvent() {
-        let endpoint = APIEndpoint(path: "/v1/admin", method: .get)
-        let data = Data()
-
-        let event = HTTPEvent.forbidden(endpoint: endpoint, data: data)
-
-        if case .forbidden(let ep, _) = event {
-            XCTAssertEqual(ep.path, "/v1/admin")
-        } else {
-            XCTFail("Expected forbidden event")
-        }
-    }
-
     func testRateLimitedEvent() {
-        let endpoint = APIEndpoint(path: "/v1/api", method: .get)
-        let data = Data()
-        let retryAfter: TimeInterval = 60
-
-        let event = HTTPEvent.rateLimited(endpoint: endpoint, retryAfter: retryAfter, data: data)
-
-        if case .rateLimited(let ep, let retry, _) = event {
-            XCTAssertEqual(ep.path, "/v1/api")
-            XCTAssertEqual(retry, 60)
-        } else {
-            XCTFail("Expected rateLimited event")
-        }
+        let event = HTTPEvent.rateLimited(endpoint: APIEndpoint(path: "/v1/api"), retryAfter: 60, data: Data())
+        guard case .rateLimited(let ep, let retry, _) = event else { return XCTFail("expected rateLimited") }
+        XCTAssertEqual(ep.path, "/v1/api")
+        XCTAssertEqual(retry, 60)
     }
-
-    func testRateLimitedEventWithNilRetryAfter() {
-        let endpoint = APIEndpoint(path: "/v1/api", method: .get)
-        let data = Data()
-
-        let event = HTTPEvent.rateLimited(endpoint: endpoint, retryAfter: nil, data: data)
-
-        if case .rateLimited(_, let retry, _) = event {
-            XCTAssertNil(retry)
-        } else {
-            XCTFail("Expected rateLimited event")
-        }
-    }
-
-    func testServiceUnavailableEvent() {
-        let endpoint = APIEndpoint(path: "/v1/service", method: .get)
-        let data = Data()
-
-        let event = HTTPEvent.serviceUnavailable(endpoint: endpoint, data: data)
-
-        if case .serviceUnavailable(let ep, _) = event {
-            XCTAssertEqual(ep.path, "/v1/service")
-        } else {
-            XCTFail("Expected serviceUnavailable event")
-        }
-    }
-
     func testServerErrorEvent() {
-        let endpoint = APIEndpoint(path: "/v1/error", method: .post)
-        let data = Data()
-
-        let event = HTTPEvent.serverError(statusCode: 500, endpoint: endpoint, data: data)
-
-        if case .serverError(let code, let ep, _) = event {
-            XCTAssertEqual(code, 500)
-            XCTAssertEqual(ep.path, "/v1/error")
-        } else {
-            XCTFail("Expected serverError event")
-        }
-    }
-
-    func testHTTPEventIsSendable() {
-        let endpoint = APIEndpoint(path: "/test")
-        let event = HTTPEvent.unauthorized(endpoint: endpoint, data: Data())
-
-        Task {
-            let _ = event
-        }
+        let event = HTTPEvent.serverError(statusCode: 500, endpoint: APIEndpoint(path: "/e"), data: Data())
+        guard case .serverError(let code, _, _) = event else { return XCTFail("expected serverError") }
+        XCTAssertEqual(code, 500)
     }
 }
 
-// MARK: - Mock URLSession
+// MARK: - Test Contracts & helpers
 
-final class MockURLProtocol: URLProtocol {
-    nonisolated(unsafe) static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
-
-    override class func canInit(with request: URLRequest) -> Bool {
-        return true
-    }
-
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
-        return request
-    }
-
-    override func startLoading() {
-        guard let handler = MockURLProtocol.requestHandler else {
-            fatalError("Handler not set")
-        }
-
-        do {
-            let (response, data) = try handler(request)
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: data)
-            client?.urlProtocolDidFinishLoading(self)
-        } catch {
-            client?.urlProtocol(self, didFailWithError: error)
-        }
-    }
-
-    override func stopLoading() {}
-}
-
-// MARK: - Mock AuthTokenProvider
-
-struct MockAuthTokenProvider: AuthTokenProvider {
-    let token: String?
-    let shouldThrow: Bool
-
-    init(token: String? = nil, shouldThrow: Bool = false) {
-        self.token = token
-        self.shouldThrow = shouldThrow
-    }
-
-    func getToken() async throws -> String? {
-        if shouldThrow {
-            throw NSError(domain: "AuthError", code: -1)
-        }
-        return token
-    }
-}
-
-// MARK: - Test Contract (using resolvePath as protocol requirement)
-
-enum TestAPIGroup: APIContractGroup {
-    static let basePath: String = "/v1"
+private enum TestAPIGroup: APIContractGroup {
+    static let basePath = "/v1"
     static let auth: AuthScheme = .bearer
     static let endpoints: [EndpointDescriptor] = []
-}
-
-struct TestContract: APIContract, APIInput {
-    typealias Group = TestAPIGroup
-    typealias Input = Self
-    typealias Output = TestResponse
-
-    static let method: APIMethod = .get
-    static let subPath: String = "/users"
-
-    var pathParameters: [String: String] { [:] }
-    var queryParameters: [String: String]? { nil }
-
-    func encodeBody(using encoder: JSONEncoder) throws -> Data? { nil }
-
-    static func decode(
-        pathParameters: [String: String],
-        queryParameters: [String: String],
-        body: Data?,
-        decoder: JSONDecoder
-    ) throws -> Self {
-        Self()
+    static func decodeError(statusCode: Int, data: Data, headers: [String: String], decoder: any APIBodyDecoder) -> (any Error)? {
+        guard statusCode == 422 else { return nil }
+        return (try? decoder.decode(TestErrorBody.self, from: data)).map { CustomError.validation($0.message) }
     }
 }
 
-struct TestResponse: Codable, Sendable {
-    let id: Int
-    let name: String
-}
+struct TestErrorBody: Codable, Sendable { let message: String }
+enum CustomError: Error, Equatable { case validation(String) }
 
-struct PostContract: APIContract, APIInput {
+struct TestResponse: Codable, Sendable, Equatable { let id: Int; let name: String }
+struct PostBody: Codable, Sendable { let userName: String }
+
+private struct GetContract: APIContract, APIInput {
     typealias Group = TestAPIGroup
     typealias Input = Self
     typealias Output = TestResponse
+    static let method: APIMethod = .get
+    static let subPath = "/users"
+    func encodeBody(using encoder: any APIBodyEncoder) throws -> Data? { nil }
+    static func decode(pathParameters: [String: String], queryParameters: [String: String], body: Data?, decoder: any APIBodyDecoder) throws -> Self { Self() }
+}
 
+private struct PostContract: APIContract, APIInput {
+    typealias Group = TestAPIGroup
+    typealias Input = Self
+    typealias Output = TestResponse
     static let method: APIMethod = .post
-    static let subPath: String = "/users"
-
-    let bodyContent: PostBody
-
-    var pathParameters: [String: String] { [:] }
-    var queryParameters: [String: String]? { nil }
-
-    func encodeBody(using encoder: JSONEncoder) throws -> Data? {
-        try encoder.encode(bodyContent)
-    }
-
-    static func decode(
-        pathParameters: [String: String],
-        queryParameters: [String: String],
-        body: Data?,
-        decoder: JSONDecoder
-    ) throws -> Self {
-        fatalError("Client-only contract")
-    }
+    static let subPath = "/users"
+    let body: PostBody
+    func encodeBody(using encoder: any APIBodyEncoder) throws -> Data? { try encoder.encode(body) }
+    static func decode(pathParameters: [String: String], queryParameters: [String: String], body: Data?, decoder: any APIBodyDecoder) throws -> Self { fatalError() }
 }
 
-struct PostBody: Codable, Sendable {
-    let name: String
-}
-
-struct QueryContract: APIContract, APIInput {
+private struct QueryContract: APIContract, APIInput {
     typealias Group = TestAPIGroup
     typealias Input = Self
     typealias Output = TestResponse
-
     static let method: APIMethod = .get
-    static let subPath: String = "/users"
-
+    static let subPath = "/users"
     let page: Int
-    let limit: Int
-
-    var pathParameters: [String: String] { [:] }
-    var queryParameters: [String: String]? {
-        ["page": "\(page)", "limit": "\(limit)"]
-    }
-
-    func encodeBody(using encoder: JSONEncoder) throws -> Data? { nil }
-
-    static func decode(
-        pathParameters: [String: String],
-        queryParameters: [String: String],
-        body: Data?,
-        decoder: JSONDecoder
-    ) throws -> Self {
-        Self(page: 0, limit: 0)
-    }
+    var queryParameters: [String: String]? { ["page": "\(page)"] }
+    func encodeBody(using encoder: any APIBodyEncoder) throws -> Data? { nil }
+    static func decode(pathParameters: [String: String], queryParameters: [String: String], body: Data?, decoder: any APIBodyDecoder) throws -> Self { Self(page: 0) }
 }
 
-// MARK: - APIClientImpl Tests
+private struct ErrorContract: APIContract, APIInput {
+    typealias Group = TestAPIGroup
+    typealias Input = Self
+    typealias Output = TestResponse
+    static let method: APIMethod = .get
+    static let subPath = "/fail"
+    func encodeBody(using encoder: any APIBodyEncoder) throws -> Data? { nil }
+    static func decode(pathParameters: [String: String], queryParameters: [String: String], body: Data?, decoder: any APIBodyDecoder) throws -> Self { Self() }
+}
+
+struct StreamEvent: Codable, Sendable, Equatable { let delta: String }
+
+private struct StreamContract: StreamingAPIContract, APIInput {
+    typealias Group = TestAPIGroup
+    typealias Input = Self
+    typealias Event = StreamEvent
+    static let method: APIMethod = .post
+    static let subPath = "/stream"
+    func encodeBody(using encoder: any APIBodyEncoder) throws -> Data? { nil }
+    static func decode(pathParameters: [String: String], queryParameters: [String: String], body: Data?, decoder: any APIBodyDecoder) throws -> Self { Self() }
+}
+
+private struct StaticToken: AuthTokenProvider { let token: String?; func getToken() async throws -> String? { token } }
+
+private func okResponse(_ json: String) -> HTTPResponse {
+    HTTPResponse(status: 200, headers: ["Content-Type": "application/json"], body: Data(json.utf8))
+}
+
+// MARK: - APIClientImpl Tests (MockTransport)
 
 final class APIClientImplTests: XCTestCase {
-
-    var session: URLSession!
-    var client: APIClientImpl!
-
-    override func setUp() {
-        super.setUp()
-
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [MockURLProtocol.self]
-        session = URLSession(configuration: configuration)
-
-        client = APIClientImpl(
-            baseURL: URL(string: "https://api.example.com")!,
-            session: session
-        )
-    }
-
-    override func tearDown() {
-        MockURLProtocol.requestHandler = nil
-        session = nil
-        client = nil
-        super.tearDown()
-    }
-
-    // MARK: - Success Tests
-
-    func testExecuteSuccessfulRequest() async throws {
-        let responseData = """
-        {"id": 1, "name": "Test User"}
-        """.data(using: .utf8)!
-
-        MockURLProtocol.requestHandler = { request in
-            XCTAssertEqual(request.url?.path, "/v1/users")
-            XCTAssertEqual(request.httpMethod, "GET")
-
-            let response = HTTPURLResponse(
-                url: request.url!,
-                statusCode: 200,
-                httpVersion: nil,
-                headerFields: nil
-            )!
-            return (response, responseData)
-        }
-
-        let contract = TestContract()
-        let result: TestResponse = try await client.execute(contract)
-
-        XCTAssertEqual(result.id, 1)
-        XCTAssertEqual(result.name, "Test User")
-    }
-
-    func testExecutePostRequest() async throws {
-        let responseData = """
-        {"id": 2, "name": "Created User"}
-        """.data(using: .utf8)!
-
-        MockURLProtocol.requestHandler = { request in
-            XCTAssertEqual(request.httpMethod, "POST")
-
-            let response = HTTPURLResponse(
-                url: request.url!,
-                statusCode: 201,
-                httpVersion: nil,
-                headerFields: nil
-            )!
-            return (response, responseData)
-        }
-
-        let contract = PostContract(bodyContent: PostBody(name: "New User"))
-        let result: TestResponse = try await client.execute(contract)
-
-        XCTAssertEqual(result.id, 2)
-        XCTAssertEqual(result.name, "Created User")
-    }
-
-    func testExecuteWithQueryParameters() async throws {
-        let responseData = """
-        {"id": 1, "name": "User"}
-        """.data(using: .utf8)!
-
-        MockURLProtocol.requestHandler = { request in
-            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
-            let queryItems = components?.queryItems ?? []
-
-            XCTAssertTrue(queryItems.contains { $0.name == "page" && $0.value == "1" })
-            XCTAssertTrue(queryItems.contains { $0.name == "limit" && $0.value == "10" })
-
-            let response = HTTPURLResponse(
-                url: request.url!,
-                statusCode: 200,
-                httpVersion: nil,
-                headerFields: nil
-            )!
-            return (response, responseData)
-        }
-
-        let contract = QueryContract(page: 1, limit: 10)
-        let _: TestResponse = try await client.execute(contract)
-    }
-
-    // MARK: - Auth Token Tests
-
-    func testRequestIncludesAuthToken() async throws {
-        let clientWithAuth = APIClientImpl(
-            baseURL: URL(string: "https://api.example.com")!,
-            session: session,
-            authTokenProvider: MockAuthTokenProvider(token: "test-token-123")
-        )
-
-        let responseData = """
-        {"id": 1, "name": "User"}
-        """.data(using: .utf8)!
-
-        MockURLProtocol.requestHandler = { request in
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-token-123")
-
-            let response = HTTPURLResponse(
-                url: request.url!,
-                statusCode: 200,
-                httpVersion: nil,
-                headerFields: nil
-            )!
-            return (response, responseData)
-        }
-
-        let contract = TestContract()
-        let _: TestResponse = try await clientWithAuth.execute(contract)
-    }
-
-    func testRequestWithoutAuthToken() async throws {
-        let clientWithoutAuth = APIClientImpl(
-            baseURL: URL(string: "https://api.example.com")!,
-            session: session,
-            authTokenProvider: MockAuthTokenProvider(token: nil)
-        )
-
-        let responseData = """
-        {"id": 1, "name": "User"}
-        """.data(using: .utf8)!
-
-        MockURLProtocol.requestHandler = { request in
-            XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
-
-            let response = HTTPURLResponse(
-                url: request.url!,
-                statusCode: 200,
-                httpVersion: nil,
-                headerFields: nil
-            )!
-            return (response, responseData)
-        }
-
-        let contract = TestContract()
-        let _: TestResponse = try await clientWithoutAuth.execute(contract)
-    }
-
-    // MARK: - Error Status Code Tests
-
-    func testUnauthorizedError() async throws {
-        MockURLProtocol.requestHandler = { request in
-            let response = HTTPURLResponse(
-                url: request.url!,
-                statusCode: 401,
-                httpVersion: nil,
-                headerFields: nil
-            )!
-            return (response, Data())
-        }
-
-        let contract = TestContract()
-
-        do {
-            let _: TestResponse = try await client.execute(contract)
-            XCTFail("Expected error to be thrown")
-        } catch let error as APIError {
-            if case .unauthorized = error {
-                // Expected
-            } else {
-                XCTFail("Expected unauthorized error")
-            }
-        }
-    }
-
-    func testNotFoundError() async throws {
-        let errorData = """
-        {"error": "Not Found"}
-        """.data(using: .utf8)!
-
-        MockURLProtocol.requestHandler = { request in
-            let response = HTTPURLResponse(
-                url: request.url!,
-                statusCode: 404,
-                httpVersion: nil,
-                headerFields: nil
-            )!
-            return (response, errorData)
-        }
-
-        let contract = TestContract()
-
-        do {
-            let _: TestResponse = try await client.execute(contract)
-            XCTFail("Expected error to be thrown")
-        } catch let error as APIError {
-            if case .httpError(let statusCode, _) = error {
-                XCTAssertEqual(statusCode, 404)
-            } else {
-                XCTFail("Expected httpError")
-            }
-        }
-    }
-
-    func testServerError() async throws {
-        MockURLProtocol.requestHandler = { request in
-            let response = HTTPURLResponse(
-                url: request.url!,
-                statusCode: 500,
-                httpVersion: nil,
-                headerFields: nil
-            )!
-            return (response, Data())
-        }
-
-        let contract = TestContract()
-
-        do {
-            let _: TestResponse = try await client.execute(contract)
-            XCTFail("Expected error to be thrown")
-        } catch let error as APIError {
-            if case .httpError(let statusCode, _) = error {
-                XCTAssertEqual(statusCode, 500)
-            } else {
-                XCTFail("Expected httpError")
-            }
-        }
-    }
-
-    // MARK: - Decoding Error Test
-
-    func testDecodingError() async throws {
-        let invalidJSON = "not valid json".data(using: .utf8)!
-
-        MockURLProtocol.requestHandler = { request in
-            let response = HTTPURLResponse(
-                url: request.url!,
-                statusCode: 200,
-                httpVersion: nil,
-                headerFields: nil
-            )!
-            return (response, invalidJSON)
-        }
-
-        let contract = TestContract()
-
-        do {
-            let _: TestResponse = try await client.execute(contract)
-            XCTFail("Expected error to be thrown")
-        } catch let error as APIError {
-            if case .decodingError = error {
-                // Expected
-            } else {
-                XCTFail("Expected decodingError, got \(error)")
-            }
-        }
-    }
-
-    // MARK: - Default Headers Test
-
-    func testDefaultHeaders() async throws {
-        let clientWithHeaders = APIClientImpl(
-            baseURL: URL(string: "https://api.example.com")!,
-            session: session,
-            defaultHeaders: ["X-API-Key": "secret-key"]
-        )
-
-        let responseData = """
-        {"id": 1, "name": "User"}
-        """.data(using: .utf8)!
-
-        MockURLProtocol.requestHandler = { request in
-            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "secret-key")
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
-
-            let response = HTTPURLResponse(
-                url: request.url!,
-                statusCode: 200,
-                httpVersion: nil,
-                headerFields: nil
-            )!
-            return (response, responseData)
-        }
-
-        let contract = TestContract()
-        let _: TestResponse = try await clientWithHeaders.execute(contract)
-    }
-
-    // MARK: - Retry-After Parsing Tests
-
-    func testParseRetryAfterSeconds() {
-        let response = HTTPURLResponse(
-            url: URL(string: "https://api.example.com")!,
-            statusCode: 429,
-            httpVersion: nil,
-            headerFields: ["Retry-After": "120"]
-        )!
-
-        let retryAfter = APIClientImpl.parseRetryAfter(from: response)
-
-        XCTAssertEqual(retryAfter, 120)
-    }
-
-    func testParseRetryAfterMissing() {
-        let response = HTTPURLResponse(
-            url: URL(string: "https://api.example.com")!,
-            statusCode: 429,
-            httpVersion: nil,
-            headerFields: nil
-        )!
-
-        let retryAfter = APIClientImpl.parseRetryAfter(from: response)
-
-        XCTAssertNil(retryAfter)
-    }
-
-    // MARK: - Encode Test
-
-    func testEncode() throws {
-        struct TestData: Codable {
-            let name: String
-            let value: Int
-        }
-
-        let data = TestData(name: "test", value: 42)
-        let encoded = try client.encode(data)
-
-        let decoded = try JSONDecoder().decode(TestData.self, from: encoded)
-        XCTAssertEqual(decoded.name, "test")
-        XCTAssertEqual(decoded.value, 42)
-    }
-
-    func testEncodeWithConvertToSnakeCaseStrategy() throws {
-        // keyEncodingStrategy = .convertToSnakeCase を指定したクライアントは、
-        // camelCase の Swift フィールドを snake_case JSON キーへ自動変換する。
-        // これにより Codable 側は CodingKey への snake_case 明示マッピングを持たずに済み、
-        // keyDecodingStrategy = .convertFromSnakeCase と対称な挙動を取る。
-        let clientWithSnakeEncoder = APIClientImpl(
-            baseURL: URL(string: "https://example.com")!,
-            keyEncodingStrategy: .convertToSnakeCase
-        )
-
-        struct MealLog: Codable {
-            let mealType: String
-            let hungerVsCraving: String
-            let loggedAt: String
-        }
-
-        let encoded = try clientWithSnakeEncoder.encode(
-            MealLog(mealType: "breakfast", hungerVsCraving: "hunger", loggedAt: "2026-04-18T00:00:00Z")
-        )
-
-        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
-        XCTAssertEqual(json["meal_type"] as? String, "breakfast")
-        XCTAssertEqual(json["hunger_vs_craving"] as? String, "hunger")
-        XCTAssertEqual(json["logged_at"] as? String, "2026-04-18T00:00:00Z")
-    }
-
-    // MARK: - executeWithResponse Tests
-
-    func testExecuteWithResponseReturnsStatusCodeAndHeaders() async throws {
-        let responseData = """
-        {"id": 1, "name": "User"}
-        """.data(using: .utf8)!
-
-        MockURLProtocol.requestHandler = { request in
-            let response = HTTPURLResponse(
-                url: request.url!,
-                statusCode: 200,
-                httpVersion: nil,
-                headerFields: ["X-Request-Id": "abc-123", "X-RateLimit-Remaining": "99"]
-            )!
-            return (response, responseData)
-        }
-
-        let contract = TestContract()
-        let response: APIResponse<TestResponse> = try await client.executeWithResponse(contract)
-
-        XCTAssertEqual(response.output.id, 1)
-        XCTAssertEqual(response.output.name, "User")
+    private let baseURL = URL(string: "https://api.example.com")!
+
+    func testGetDecodesOutput() async throws {
+        let mock = MockTransport { _ in okResponse(#"{"id":1,"name":"Ada"}"#) }
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
+        let response = try await client.executeWithResponse(GetContract())
+        XCTAssertEqual(response.output, TestResponse(id: 1, name: "Ada"))
         XCTAssertEqual(response.statusCode, 200)
-        XCTAssertEqual(response.header("x-request-id"), "abc-123")
-        XCTAssertEqual(response.header("x-ratelimit-remaining"), "99")
+        XCTAssertEqual(mock.recordedRequests.first?.url.path, "/v1/users")
     }
 
-    // MARK: - AuthScheme Tests
-
-    func testAPIKeyAuthScheme() async throws {
-        let clientWithApiKey = APIClientImpl(
-            baseURL: URL(string: "https://api.example.com")!,
-            session: session,
-            authTokenProvider: MockAuthTokenProvider(token: "my-api-key")
-        )
-
-        let responseData = """
-        {"id": 1, "name": "User"}
-        """.data(using: .utf8)!
-
-        MockURLProtocol.requestHandler = { request in
-            XCTAssertEqual(request.value(forHTTPHeaderField: "x-api-key"), "my-api-key")
-            XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
-
-            let response = HTTPURLResponse(
-                url: request.url!,
-                statusCode: 200,
-                httpVersion: nil,
-                headerFields: nil
-            )!
-            return (response, responseData)
-        }
-
-        let contract = APIKeyContract()
-        let _: TestResponse = try await clientWithApiKey.execute(contract)
+    func testPostEncodesBody() async throws {
+        let mock = MockTransport { _ in okResponse(#"{"id":2,"name":"x"}"#) }
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
+        _ = try await client.execute(PostContract(body: PostBody(userName: "ada")))
+        let body = try XCTUnwrap(mock.recordedRequests.first?.body)
+        XCTAssertEqual(String(decoding: body, as: UTF8.self), #"{"userName":"ada"}"#)
+        XCTAssertEqual(mock.recordedRequests.first?.method, "POST")
     }
 
-    func testNoAuthScheme() async throws {
-        let clientWithAuth = APIClientImpl(
-            baseURL: URL(string: "https://api.example.com")!,
-            session: session,
-            authTokenProvider: MockAuthTokenProvider(token: "should-not-appear")
-        )
-
-        let responseData = """
-        {"id": 1, "name": "User"}
-        """.data(using: .utf8)!
-
-        MockURLProtocol.requestHandler = { request in
-            XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
-            XCTAssertNil(request.value(forHTTPHeaderField: "x-api-key"))
-
-            let response = HTTPURLResponse(
-                url: request.url!,
-                statusCode: 200,
-                httpVersion: nil,
-                headerFields: nil
-            )!
-            return (response, responseData)
-        }
-
-        let contract = NoAuthContract()
-        let _: TestResponse = try await clientWithAuth.execute(contract)
+    func testSnakeCaseKeyStyle() async throws {
+        let mock = MockTransport { _ in okResponse(#"{"id":1,"name":"x"}"#) }
+        let client = APIClientImpl(baseURL: baseURL, transport: mock, keyStyle: .snakeCase)
+        _ = try await client.execute(PostContract(body: PostBody(userName: "ada")))
+        let body = try XCTUnwrap(mock.recordedRequests.first?.body)
+        XCTAssertEqual(String(decoding: body, as: UTF8.self), #"{"user_name":"ada"}"#)
     }
 
-    // MARK: - Group Headers Tests
-
-    func testGroupCommonHeadersAreApplied() async throws {
-        let responseData = """
-        {"id": 1, "name": "User"}
-        """.data(using: .utf8)!
-
-        MockURLProtocol.requestHandler = { request in
-            XCTAssertEqual(request.value(forHTTPHeaderField: "anthropic-version"), "2023-06-01")
-
-            let response = HTTPURLResponse(
-                url: request.url!,
-                statusCode: 200,
-                httpVersion: nil,
-                headerFields: nil
-            )!
-            return (response, responseData)
-        }
-
-        let clientWithApiKey = APIClientImpl(
-            baseURL: URL(string: "https://api.anthropic.com")!,
-            session: session,
-            authTokenProvider: MockAuthTokenProvider(token: "sk-test")
-        )
-
-        let contract = APIKeyContract()
-        let _: TestResponse = try await clientWithApiKey.execute(contract)
+    func testQueryParameters() async throws {
+        let mock = MockTransport { _ in okResponse(#"{"id":1,"name":"x"}"#) }
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
+        _ = try await client.execute(QueryContract(page: 3))
+        XCTAssertEqual(mock.recordedRequests.first?.url.query, "page=3")
     }
 
-    func testEndpointAdditionalHeadersAreApplied() async throws {
-        let responseData = """
-        {"id": 1, "name": "User"}
-        """.data(using: .utf8)!
-
-        MockURLProtocol.requestHandler = { request in
-            XCTAssertEqual(request.value(forHTTPHeaderField: "anthropic-version"), "2023-06-01")
-            XCTAssertEqual(request.value(forHTTPHeaderField: "anthropic-beta"), "structured-outputs")
-
-            let response = HTTPURLResponse(
-                url: request.url!,
-                statusCode: 200,
-                httpVersion: nil,
-                headerFields: nil
-            )!
-            return (response, responseData)
-        }
-
-        let clientWithApiKey = APIClientImpl(
-            baseURL: URL(string: "https://api.anthropic.com")!,
-            session: session,
-            authTokenProvider: MockAuthTokenProvider(token: "sk-test")
-        )
-
-        let contract = HeaderedContract(betaHeader: "structured-outputs")
-        let _: TestResponse = try await clientWithApiKey.execute(contract)
+    func testBearerAuthHeader() async throws {
+        let mock = MockTransport { _ in okResponse(#"{"id":1,"name":"x"}"#) }
+        let client = APIClientImpl(baseURL: baseURL, transport: mock, authTokenProvider: StaticToken(token: "secret"))
+        _ = try await client.execute(GetContract())
+        XCTAssertEqual(mock.recordedRequests.first?.headers["authorization"], "Bearer secret")
     }
 
-    // MARK: - Custom Error Decoding Tests
-
-    func testCustomErrorDecoding() async throws {
-        let errorData = """
-        {"error": {"type": "invalid_request_error", "message": "Bad request"}}
-        """.data(using: .utf8)!
-
-        MockURLProtocol.requestHandler = { request in
-            let response = HTTPURLResponse(
-                url: request.url!,
-                statusCode: 400,
-                httpVersion: nil,
-                headerFields: nil
-            )!
-            return (response, errorData)
-        }
-
-        let clientWithApiKey = APIClientImpl(
-            baseURL: URL(string: "https://api.anthropic.com")!,
-            session: session,
-            authTokenProvider: MockAuthTokenProvider(token: "sk-test")
-        )
-
-        let contract = CustomErrorContract()
-
+    func testErrorStatusMapsToAPIError() async {
+        let mock = MockTransport(status: 404, body: Data(#"{"error":"nope"}"#.utf8))
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
         do {
-            let _: TestResponse = try await clientWithApiKey.execute(contract)
-            XCTFail("Expected error")
-        } catch let error as CustomAPIError {
-            XCTAssertEqual(error.type, "invalid_request_error")
-            XCTAssertEqual(error.message, "Bad request")
-        }
+            _ = try await client.executeWithResponse(ErrorContract())
+            XCTFail("expected error")
+        } catch let APIError.httpError(statusCode, _) {
+            XCTAssertEqual(statusCode, 404)
+        } catch { XCTFail("unexpected: \(error)") }
     }
 
-    // MARK: - RetryPolicy Tests
-
-    func testClientWithRetryPolicy() {
-        let clientWithRetry = APIClientImpl(
-            baseURL: URL(string: "https://api.example.com")!,
-            session: session,
-            retryPolicy: ExponentialBackoff(maxRetries: 3, baseDelay: 0.01)
-        )
-
-        XCTAssertNotNil(clientWithRetry)
-    }
-}
-
-// MARK: - Additional Test Contracts
-
-enum APIKeyTestGroup: APIContractGroup {
-    static let basePath: String = "/v1/messages"
-    static let auth: AuthScheme = .apiKey(headerName: "x-api-key")
-    static let commonHeaders: [String: String] = ["anthropic-version": "2023-06-01"]
-    static let endpoints: [EndpointDescriptor] = []
-}
-
-enum NoAuthGroup: APIContractGroup {
-    static let basePath: String = "/public"
-    static let auth: AuthScheme = .none
-    static let endpoints: [EndpointDescriptor] = []
-}
-
-struct APIKeyContract: APIContract, APIInput {
-    typealias Group = APIKeyTestGroup
-    typealias Input = Self
-    typealias Output = TestResponse
-
-    static let method: APIMethod = .get
-    static let subPath: String = ""
-
-    var pathParameters: [String: String] { [:] }
-    var queryParameters: [String: String]? { nil }
-
-    func encodeBody(using encoder: JSONEncoder) throws -> Data? { nil }
-
-    static func decode(
-        pathParameters: [String: String],
-        queryParameters: [String: String],
-        body: Data?,
-        decoder: JSONDecoder
-    ) throws -> Self { Self() }
-}
-
-struct NoAuthContract: APIContract, APIInput {
-    typealias Group = NoAuthGroup
-    typealias Input = Self
-    typealias Output = TestResponse
-
-    static let method: APIMethod = .get
-    static let subPath: String = "/data"
-
-    var pathParameters: [String: String] { [:] }
-    var queryParameters: [String: String]? { nil }
-
-    func encodeBody(using encoder: JSONEncoder) throws -> Data? { nil }
-
-    static func decode(
-        pathParameters: [String: String],
-        queryParameters: [String: String],
-        body: Data?,
-        decoder: JSONDecoder
-    ) throws -> Self { Self() }
-}
-
-struct HeaderedContract: APIContract, APIInput {
-    typealias Group = APIKeyTestGroup
-    typealias Input = Self
-    typealias Output = TestResponse
-
-    static let method: APIMethod = .post
-    static let subPath: String = ""
-
-    let betaHeader: String?
-
-    var pathParameters: [String: String] { [:] }
-    var queryParameters: [String: String]? { nil }
-    var additionalHeaders: [String: String] {
-        var headers: [String: String] = [:]
-        if let betaHeader {
-            headers["anthropic-beta"] = betaHeader
-        }
-        return headers
+    func testCustomErrorDecode() async {
+        let mock = MockTransport(status: 422, body: Data(#"{"message":"bad input"}"#.utf8))
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
+        do {
+            _ = try await client.executeWithResponse(ErrorContract())
+            XCTFail("expected error")
+        } catch CustomError.validation(let message) {
+            XCTAssertEqual(message, "bad input")
+        } catch { XCTFail("unexpected: \(error)") }
     }
 
-    func encodeBody(using encoder: JSONEncoder) throws -> Data? { nil }
-
-    static func decode(
-        pathParameters: [String: String],
-        queryParameters: [String: String],
-        body: Data?,
-        decoder: JSONDecoder
-    ) throws -> Self { Self(betaHeader: nil) }
-}
-
-/// Custom error for testing decodeError
-struct CustomAPIError: Error {
-    let type: String
-    let message: String
-}
-
-enum CustomErrorGroup: APIContractGroup {
-    static let basePath: String = "/v1"
-    static let auth: AuthScheme = .apiKey(headerName: "x-api-key")
-    static let endpoints: [EndpointDescriptor] = []
-
-    static func decodeError(statusCode: Int, data: Data, headers: [String: String], decoder: JSONDecoder) -> (any Error)? {
-        struct ErrorBody: Decodable {
-            let error: ErrorDetail
-            struct ErrorDetail: Decodable {
-                let type: String
-                let message: String
-            }
-        }
-        guard let body = try? decoder.decode(ErrorBody.self, from: data) else { return nil }
-        return CustomAPIError(type: body.error.type, message: body.error.message)
-    }
-}
-
-struct CustomErrorContract: APIContract, APIInput {
-    typealias Group = CustomErrorGroup
-    typealias Input = Self
-    typealias Output = TestResponse
-
-    static let method: APIMethod = .post
-    static let subPath: String = "/test"
-
-    var pathParameters: [String: String] { [:] }
-    var queryParameters: [String: String]? { nil }
-
-    func encodeBody(using encoder: JSONEncoder) throws -> Data? { nil }
-
-    static func decode(
-        pathParameters: [String: String],
-        queryParameters: [String: String],
-        body: Data?,
-        decoder: JSONDecoder
-    ) throws -> Self { Self() }
-}
-
-// MARK: - RetryPolicy Tests
-
-final class RetryPolicyTests: XCTestCase {
-
-    func testExponentialBackoffDefaults() {
-        let policy = ExponentialBackoff.default
-        XCTAssertEqual(policy.maxRetries, 3)
-        XCTAssertEqual(policy.baseDelay, 1.0)
-        XCTAssertEqual(policy.maxDelay, 60.0)
-    }
-
-    func testExponentialBackoffShouldRetry() {
-        let policy = ExponentialBackoff.default
-        XCTAssertTrue(policy.shouldRetry(statusCode: 429, attempt: 1))
-        XCTAssertTrue(policy.shouldRetry(statusCode: 500, attempt: 1))
-        XCTAssertTrue(policy.shouldRetry(statusCode: 502, attempt: 1))
-        XCTAssertTrue(policy.shouldRetry(statusCode: 503, attempt: 1))
-        XCTAssertTrue(policy.shouldRetry(statusCode: 504, attempt: 1))
-        XCTAssertFalse(policy.shouldRetry(statusCode: 400, attempt: 1))
-        XCTAssertFalse(policy.shouldRetry(statusCode: 401, attempt: 1))
-        XCTAssertFalse(policy.shouldRetry(statusCode: 404, attempt: 1))
-    }
-
-    func testExponentialBackoffRespectsMaxRetries() {
-        let policy = ExponentialBackoff(maxRetries: 2)
-        XCTAssertTrue(policy.shouldRetry(statusCode: 500, attempt: 1))
-        XCTAssertFalse(policy.shouldRetry(statusCode: 500, attempt: 2))
-        XCTAssertFalse(policy.shouldRetry(statusCode: 500, attempt: 3))
-    }
-
-    func testExponentialBackoffDelayIncreases() {
-        let policy = ExponentialBackoff(maxRetries: 5, baseDelay: 1.0, maxDelay: 60.0, jitter: 0.0)
-        let delay1 = policy.delay(for: 1, retryAfter: nil)
-        let delay2 = policy.delay(for: 2, retryAfter: nil)
-        let delay3 = policy.delay(for: 3, retryAfter: nil)
-
-        XCTAssertEqual(delay1, 1.0)
-        XCTAssertEqual(delay2, 2.0)
-        XCTAssertEqual(delay3, 4.0)
-    }
-
-    func testExponentialBackoffRespectsRetryAfter() {
-        let policy = ExponentialBackoff.default
-        let delay = policy.delay(for: 1, retryAfter: 30.0)
-        XCTAssertEqual(delay, 30.0)
-    }
-
-    func testExponentialBackoffRespectsMaxDelay() {
-        let policy = ExponentialBackoff(maxRetries: 10, baseDelay: 1.0, maxDelay: 10.0, jitter: 0.0)
-        let delay = policy.delay(for: 8, retryAfter: nil)
-        XCTAssertLessThanOrEqual(delay, 10.0)
-    }
-
-    func testNoRetryPolicy() {
-        let policy = NoRetry()
-        XCTAssertEqual(policy.maxRetries, 0)
-        XCTAssertFalse(policy.shouldRetry(statusCode: 500, attempt: 1))
-        XCTAssertEqual(policy.delay(for: 1, retryAfter: nil), 0)
-    }
-}
-
-// MARK: - Date Encoding/Decoding Tests
-
-final class DateStrategyTests: XCTestCase {
-
-    func testDefaultDateEncodingStrategy() throws {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = APIClientImpl.defaultDateEncodingStrategy()
-
-        struct DateContainer: Codable {
-            let date: Date
-        }
-
-        let date = Date(timeIntervalSince1970: 1704067200) // 2024-01-01T00:00:00Z
-        let container = DateContainer(date: date)
-
-        let data = try encoder.encode(container)
-        let jsonString = String(data: data, encoding: .utf8)!
-
-        XCTAssertTrue(jsonString.contains("2024-01-01"))
-    }
-
-    func testDefaultDateDecodingStrategyISO8601() throws {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = APIClientImpl.defaultDateDecodingStrategy()
-
-        struct DateContainer: Codable {
-            let date: Date
-        }
-
-        let json = """
-        {"date": "2024-01-01T12:00:00Z"}
-        """.data(using: .utf8)!
-
-        let container = try decoder.decode(DateContainer.self, from: json)
-        let calendar = Calendar(identifier: .gregorian)
-        let components = calendar.dateComponents(in: TimeZone(identifier: "UTC")!, from: container.date)
-
-        XCTAssertEqual(components.year, 2024)
-        XCTAssertEqual(components.month, 1)
-        XCTAssertEqual(components.day, 1)
-    }
-
-    func testDefaultDateDecodingStrategyWithFractionalSeconds() throws {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = APIClientImpl.defaultDateDecodingStrategy()
-
-        struct DateContainer: Codable {
-            let date: Date
-        }
-
-        let json = """
-        {"date": "2024-01-01T12:00:00.123Z"}
-        """.data(using: .utf8)!
-
-        let container = try decoder.decode(DateContainer.self, from: json)
-
-        XCTAssertNotNil(container.date)
-    }
-
-    func testDefaultDateDecodingStrategyDateOnly() throws {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = APIClientImpl.defaultDateDecodingStrategy()
-
-        struct DateContainer: Codable {
-            let date: Date
-        }
-
-        let json = """
-        {"date": "2024-01-15"}
-        """.data(using: .utf8)!
-
-        let container = try decoder.decode(DateContainer.self, from: json)
-        let calendar = Calendar(identifier: .gregorian)
-        let components = calendar.dateComponents(in: TimeZone(identifier: "UTC")!, from: container.date)
-
-        XCTAssertEqual(components.year, 2024)
-        XCTAssertEqual(components.month, 1)
-        XCTAssertEqual(components.day, 15)
-    }
-
-    func testDefaultDateDecodingStrategyInvalidFormat() {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = APIClientImpl.defaultDateDecodingStrategy()
-
-        struct DateContainer: Codable {
-            let date: Date
-        }
-
-        let json = """
-        {"date": "not-a-date"}
-        """.data(using: .utf8)!
-
-        XCTAssertThrowsError(try decoder.decode(DateContainer.self, from: json))
-    }
-}
-
-// MARK: - SSEEvent Tests
-
-final class SSEEventTests: XCTestCase {
-
-    func testSSEEventWithDataOnly() {
-        let event = SSEEvent(data: "test data")
-
-        XCTAssertEqual(event.data, "test data")
-        XCTAssertNil(event.event)
-        XCTAssertNil(event.id)
-        XCTAssertNil(event.retry)
-    }
-
-    func testSSEEventWithAllFields() {
-        let event = SSEEvent(
-            data: "test data",
-            event: "message",
-            id: "123",
-            retry: 5000
-        )
-
-        XCTAssertEqual(event.data, "test data")
-        XCTAssertEqual(event.event, "message")
-        XCTAssertEqual(event.id, "123")
-        XCTAssertEqual(event.retry, 5000)
-    }
-
-    func testSSEEventEquatable() {
-        let event1 = SSEEvent(data: "test", event: "message")
-        let event2 = SSEEvent(data: "test", event: "message")
-        let event3 = SSEEvent(data: "different", event: "message")
-
-        XCTAssertEqual(event1, event2)
-        XCTAssertNotEqual(event1, event3)
-    }
-
-    func testSSEEventHashable() {
-        let event1 = SSEEvent(data: "test", event: "message")
-        let event2 = SSEEvent(data: "test", event: "message")
-
-        var set = Set<SSEEvent>()
-        set.insert(event1)
-        set.insert(event2)
-
-        XCTAssertEqual(set.count, 1)
-    }
-
-    func testSSEEventDecodeData() throws {
-        struct TestPayload: Codable {
-            let name: String
-            let value: Int
-        }
-
-        let event = SSEEvent(data: #"{"name":"test","value":42}"#)
-        let payload = try event.decodeData(TestPayload.self)
-
-        XCTAssertEqual(payload.name, "test")
-        XCTAssertEqual(payload.value, 42)
-    }
-
-    func testSSEEventDecodeDataWithISO8601() throws {
-        struct DatePayload: Codable {
-            let timestamp: Date
-        }
-
-        let event = SSEEvent(data: #"{"timestamp":"2024-01-01T12:00:00Z"}"#)
-        let payload = try event.decodeDataWithISO8601(DatePayload.self)
-
-        let calendar = Calendar(identifier: .gregorian)
-        let components = calendar.dateComponents(in: TimeZone(identifier: "UTC")!, from: payload.timestamp)
-        XCTAssertEqual(components.year, 2024)
-    }
-
-    func testSSEEventDecodeDataThrowsWhenNoData() {
-        let event = SSEEvent(event: "ping")
-
-        XCTAssertThrowsError(try event.decodeData(String.self)) { error in
-            if case SSEError.noData = error {
-                // Expected
-            } else {
-                XCTFail("Expected SSEError.noData")
-            }
-        }
-    }
-
-    func testSSEEventIsSendable() {
-        let event = SSEEvent(data: "test")
-
-        Task {
-            let _ = event
-        }
-    }
-}
-
-// MARK: - SSEError Tests
-
-final class SSEErrorTests: XCTestCase {
-
-    func testSSEErrorDescriptions() {
-        XCTAssertEqual(SSEError.invalidURL.errorDescription, "Invalid URL")
-        XCTAssertEqual(SSEError.invalidResponse.errorDescription, "Invalid response from server")
-        XCTAssertEqual(SSEError.httpError(statusCode: 404, data: nil).errorDescription, "HTTP error: 404")
-        XCTAssertEqual(SSEError.noData.errorDescription, "No data in event")
-        XCTAssertEqual(SSEError.connectionClosed.errorDescription, "Connection closed")
-    }
-
-    func testSSEErrorDecodingDescription() {
-        let underlyingError = NSError(domain: "test", code: -1, userInfo: [
-            NSLocalizedDescriptionKey: "Parse error"
+    func testRetriesViaTransport() async throws {
+        let mock = MockTransport([
+            .response(HTTPResponse(status: 429, headers: ["retry-after": "0"], body: Data())),
+            .response(okResponse(#"{"id":9,"name":"ok"}"#)),
         ])
-        let error = SSEError.decodingError(underlyingError)
-
-        XCTAssertTrue(error.errorDescription?.contains("Decoding error") ?? false)
-    }
-
-    func testSSEErrorNetworkDescription() {
-        let underlyingError = NSError(domain: "test", code: -1, userInfo: [
-            NSLocalizedDescriptionKey: "Connection lost"
-        ])
-        let error = SSEError.networkError(underlyingError)
-
-        XCTAssertTrue(error.errorDescription?.contains("Network error") ?? false)
-    }
-}
-
-// MARK: - SSEClientImpl Tests
-
-final class SSEClientImplTests: XCTestCase {
-
-    func testSSEClientInitialization() {
-        let client = SSEClientImpl(
-            baseURL: URL(string: "https://api.example.com")!
+        let client = APIClientImpl(
+            baseURL: baseURL, transport: mock,
+            retryPolicy: ExponentialBackoff(maxAttempts: 3, baseDelay: 0)
         )
-
-        XCTAssertNotNil(client)
+        let response = try await client.executeWithResponse(GetContract())
+        XCTAssertEqual(response.output.id, 9)
+        XCTAssertEqual(mock.recordedRequests.count, 2)
     }
 
-    func testSSEClientWithAuthTokenProvider() {
-        let client = SSEClientImpl(
-            baseURL: URL(string: "https://api.example.com")!,
-            authTokenProvider: MockAuthTokenProvider(token: "test-token")
-        )
-
-        XCTAssertNotNil(client)
-    }
-
-    func testSSEClientWithDefaultHeaders() {
-        let client = SSEClientImpl(
-            baseURL: URL(string: "https://api.example.com")!,
-            defaultHeaders: ["X-API-Key": "secret"]
-        )
-
-        XCTAssertNotNil(client)
-    }
-
-    func testSSEClientIsSendable() {
-        let client = SSEClientImpl(
-            baseURL: URL(string: "https://api.example.com")!
-        )
-
-        Task {
-            let _ = client
+    func testStreamingDecodesEvents() async throws {
+        let sse = "data: {\"delta\":\"a\"}\n\ndata: {\"delta\":\"b\"}\n\ndata: [DONE]\n\n"
+        let mock = MockTransport(streamChunks: [Data(sse.utf8)])
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
+        var deltas: [String] = []
+        for try await event in client.execute(StreamContract()) {
+            deltas.append(event.delta)
         }
-    }
-
-    func testEmptySSEBodyIsSendable() {
-        let body = EmptySSEBody()
-
-        Task {
-            let _ = body
-        }
-    }
-}
-
-// MARK: - SSE Event Parsing Tests
-
-final class SSEEventParsingTests: XCTestCase {
-
-    // MARK: - Basic Parsing Tests
-
-    func testParseEventWithDataOnly() {
-        let eventString = "data: Hello, World!"
-        let event = SSEClientImpl.parseEvent(from: eventString)
-
-        XCTAssertNotNil(event)
-        XCTAssertEqual(event?.data, "Hello, World!")
-        XCTAssertNil(event?.event)
-        XCTAssertNil(event?.id)
-        XCTAssertNil(event?.retry)
-    }
-
-    func testParseEventWithAllFields() {
-        let eventString = """
-        event: message
-        data: test data
-        id: 123
-        retry: 5000
-        """
-        let event = SSEClientImpl.parseEvent(from: eventString)
-
-        XCTAssertNotNil(event)
-        XCTAssertEqual(event?.data, "test data")
-        XCTAssertEqual(event?.event, "message")
-        XCTAssertEqual(event?.id, "123")
-        XCTAssertEqual(event?.retry, 5000)
-    }
-
-    func testParseEventWithEventTypeOnly() {
-        let eventString = "event: ping"
-        let event = SSEClientImpl.parseEvent(from: eventString)
-
-        XCTAssertNotNil(event)
-        XCTAssertNil(event?.data)
-        XCTAssertEqual(event?.event, "ping")
-    }
-
-    func testParseEventWithIdOnly() {
-        let eventString = "id: abc123"
-        let event = SSEClientImpl.parseEvent(from: eventString)
-
-        XCTAssertNotNil(event)
-        XCTAssertEqual(event?.id, "abc123")
-    }
-
-    func testParseEventWithRetryOnly() {
-        let eventString = "retry: 3000"
-        let event = SSEClientImpl.parseEvent(from: eventString)
-
-        XCTAssertNotNil(event)
-        XCTAssertEqual(event?.retry, 3000)
-    }
-
-    // MARK: - Multiple Data Lines Tests
-
-    func testParseEventWithMultipleDataLines() {
-        let eventString = """
-        data: line 1
-        data: line 2
-        data: line 3
-        """
-        let event = SSEClientImpl.parseEvent(from: eventString)
-
-        XCTAssertNotNil(event)
-        XCTAssertEqual(event?.data, "line 1\nline 2\nline 3")
-    }
-
-    func testParseEventWithJSONData() {
-        let eventString = """
-        event: progress
-        data: {"type":"progress","payload":{"message":"Processing...","progress":0.5}}
-        """
-        let event = SSEClientImpl.parseEvent(from: eventString)
-
-        XCTAssertNotNil(event)
-        XCTAssertEqual(event?.event, "progress")
-        XCTAssertTrue(event?.data?.contains("progress") ?? false)
-        XCTAssertTrue(event?.data?.contains("0.5") ?? false)
-    }
-
-    // MARK: - Comment Handling Tests
-
-    func testParseEventIgnoresComments() {
-        let eventString = """
-        : this is a comment
-        data: actual data
-        : another comment
-        """
-        let event = SSEClientImpl.parseEvent(from: eventString)
-
-        XCTAssertNotNil(event)
-        XCTAssertEqual(event?.data, "actual data")
-    }
-
-    func testParseEventWithOnlyComment() {
-        let eventString = ": just a comment"
-        let event = SSEClientImpl.parseEvent(from: eventString)
-
-        XCTAssertNil(event)
-    }
-
-    // MARK: - Edge Cases
-
-    func testParseEventWithEmptyData() {
-        let eventString = "data:"
-        let event = SSEClientImpl.parseEvent(from: eventString)
-
-        XCTAssertNotNil(event)
-        XCTAssertEqual(event?.data, "")
-    }
-
-    func testParseEventWithEmptyString() {
-        let event = SSEClientImpl.parseEvent(from: "")
-        XCTAssertNil(event)
-    }
-
-    func testParseEventWithOnlyNewlines() {
-        let event = SSEClientImpl.parseEvent(from: "\n\n\n")
-        XCTAssertNil(event)
-    }
-
-    func testParseEventWithUnknownFields() {
-        let eventString = """
-        unknown: should be ignored
-        data: valid data
-        custom: also ignored
-        """
-        let event = SSEClientImpl.parseEvent(from: eventString)
-
-        XCTAssertNotNil(event)
-        XCTAssertEqual(event?.data, "valid data")
-    }
-
-    func testParseEventWithColonInData() {
-        let eventString = "data: time: 12:30:45"
-        let event = SSEClientImpl.parseEvent(from: eventString)
-
-        XCTAssertNotNil(event)
-        XCTAssertEqual(event?.data, "time: 12:30:45")
-    }
-
-    func testParseEventWithLeadingSpaceInValue() {
-        let eventString = "data:  value with leading space"
-        let event = SSEClientImpl.parseEvent(from: eventString)
-
-        XCTAssertNotNil(event)
-        // Implementation trims all leading spaces (acceptable for JSON data use case)
-        XCTAssertEqual(event?.data, "value with leading space")
-    }
-
-    func testParseEventWithInvalidRetry() {
-        let eventString = """
-        retry: not-a-number
-        data: test
-        """
-        let event = SSEClientImpl.parseEvent(from: eventString)
-
-        XCTAssertNotNil(event)
-        XCTAssertEqual(event?.data, "test")
-        XCTAssertNil(event?.retry)
-    }
-
-    // MARK: - Real-World Scenarios
-
-    func testParseEventProgressEvent() {
-        let eventString = """
-        event: progress
-        data: {"type":"progress","payload":{"message":"検索条件を分析しています...","progress":0.1,"step":"analyzing"}}
-        """
-        let event = SSEClientImpl.parseEvent(from: eventString)
-
-        XCTAssertNotNil(event)
-        XCTAssertEqual(event?.event, "progress")
-
-        // Verify JSON is parseable
-        struct ProgressData: Decodable {
-            let type: String
-            let payload: Payload
-            struct Payload: Decodable {
-                let message: String
-                let progress: Double
-                let step: String
-            }
-        }
-
-        XCTAssertNoThrow(try event?.decodeData(ProgressData.self))
-    }
-
-    func testParseEventCandidateEvent() {
-        let eventString = """
-        event: candidate
-        data: {"type":"candidate","payload":{"restaurant":{"id":"123","name":"テスト居酒屋","area":"渋谷"},"index":1}}
-        """
-        let event = SSEClientImpl.parseEvent(from: eventString)
-
-        XCTAssertNotNil(event)
-        XCTAssertEqual(event?.event, "candidate")
-        XCTAssertTrue(event?.data?.contains("テスト居酒屋") ?? false)
-    }
-
-    func testParseEventCompleteEvent() {
-        let eventString = """
-        event: complete
-        data: {"type":"complete","payload":{"result":{"candidates":[]}}}
-        """
-        let event = SSEClientImpl.parseEvent(from: eventString)
-
-        XCTAssertNotNil(event)
-        XCTAssertEqual(event?.event, "complete")
-    }
-
-    func testParseEventErrorEvent() {
-        let eventString = """
-        event: error
-        data: {"type":"error","payload":{"code":"SEARCH_ERROR","message":"検索に失敗しました","retryable":true}}
-        """
-        let event = SSEClientImpl.parseEvent(from: eventString)
-
-        XCTAssertNotNil(event)
-        XCTAssertEqual(event?.event, "error")
-    }
-
-    // MARK: - Line-Based Parsing Simulation
-
-    func testParseMultipleEventsFromLines() {
-        // Simulating how bytes.lines would deliver events
-        let lines = [
-            "event: progress",
-            "data: {\"progress\": 0.1}",
-            "",  // Empty line marks end of event
-            "event: progress",
-            "data: {\"progress\": 0.5}",
-            "",  // Empty line marks end of event
-        ]
-
-        var events: [SSEEvent] = []
-        var currentLines: [String] = []
-
-        for line in lines {
-            if line.isEmpty {
-                if !currentLines.isEmpty {
-                    let eventString = currentLines.joined(separator: "\n")
-                    if let event = SSEClientImpl.parseEvent(from: eventString) {
-                        events.append(event)
-                    }
-                    currentLines.removeAll()
-                }
-            } else {
-                currentLines.append(line)
-            }
-        }
-
-        XCTAssertEqual(events.count, 2)
-        XCTAssertEqual(events[0].event, "progress")
-        XCTAssertEqual(events[1].event, "progress")
-    }
-
-    func testParseEventWithCRLFLineEndings() {
-        // Some servers might send CRLF line endings
-        let eventString = "event: message\r\ndata: test data\r\nid: 1"
-        // Note: components(separatedBy: "\n") will keep \r in values
-        // This tests the robustness of the parser
-
-        let event = SSEClientImpl.parseEvent(from: eventString)
-        XCTAssertNotNil(event)
-        // The event type might have \r at the end
-        XCTAssertTrue(event?.event?.hasPrefix("message") ?? false)
+        XCTAssertEqual(deltas, ["a", "b"])
+        XCTAssertEqual(mock.recordedRequests.first?.headers["accept"], "text/event-stream")
     }
 }

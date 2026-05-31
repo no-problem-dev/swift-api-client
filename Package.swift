@@ -15,13 +15,18 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-docc-plugin", .upToNextMajor(from: "1.4.0")),
-        .package(url: "https://github.com/no-problem-dev/swift-api-contract.git", from: "1.1.1")
+        .package(url: "https://github.com/no-problem-dev/swift-api-contract.git", from: "2.0.0"),
+        .package(url: "https://github.com/no-problem-dev/swift-http-transport.git", from: "1.1.0"),
+        .package(url: "https://github.com/no-problem-dev/swift-structured-data.git", from: "1.2.0")
     ],
     targets: [
         .target(
             name: "APIClient",
             dependencies: [
-                .product(name: "APIContract", package: "swift-api-contract")
+                .product(name: "APIContract", package: "swift-api-contract"),
+                .product(name: "HTTPTransport", package: "swift-http-transport"),
+                .product(name: "StructuredDataCore", package: "swift-structured-data"),
+                .product(name: "JSONParsing", package: "swift-structured-data")
             ]
         ),
         .testTarget(
