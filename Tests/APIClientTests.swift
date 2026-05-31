@@ -253,6 +253,27 @@ final class APIClientImplTests: XCTestCase {
         XCTAssertEqual(mock.recordedRequests.first?.headers["accept"], "text/event-stream")
     }
 
+    func testExecuteRawReturnsBinaryBody() async throws {
+        let audio = Data([0x49, 0x44, 0x33, 0x04, 0x00])
+        let mock = MockTransport { _ in HTTPResponse(status: 200, headers: ["Content-Type": "audio/mpeg"], body: audio) }
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
+        let response = try await client.executeRaw(GetContract())
+        XCTAssertEqual(response.output, audio)
+        XCTAssertEqual(response.statusCode, 200)
+        XCTAssertEqual(mock.recordedRequests.first?.headers["accept"], "*/*")
+    }
+
+    func testExecuteRawMapsError() async throws {
+        let mock = MockTransport(status: 422, body: Data(#"{"message":"bad"}"#.utf8))
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
+        do {
+            _ = try await client.executeRaw(ErrorContract())
+            XCTFail("expected throw")
+        } catch CustomError.validation(let msg) {
+            XCTAssertEqual(msg, "bad")
+        }
+    }
+
     func testEventStreamPreservesEventNames() async throws {
         let sse = "event: start\ndata: {\"x\":1}\n\nevent: delta\ndata: hello\n\n"
         let mock = MockTransport(streamChunks: [Data(sse.utf8)])

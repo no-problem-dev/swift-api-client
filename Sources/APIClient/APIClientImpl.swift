@@ -81,6 +81,26 @@ public struct APIClientImpl: APIClient {
         }
     }
 
+    /// レスポンスボディを JSON デコードせず生の `Data` で返す。音声/画像などバイナリ応答や、
+    /// 型付きデコードに乗らない応答に使う。非 2xx は group の `decodeError` でマップする。
+    public func executeRaw<E: APIContract>(_ contract: E) async throws -> APIResponse<Data>
+        where E.Input == E, E: APIInput
+    {
+        let endpoint = APIEndpoint(path: E.resolvePath(with: contract), method: E.method)
+        let request = try await buildRequest(
+            method: E.method.rawValue,
+            path: E.resolvePath(with: contract),
+            queryParameters: contract.queryParameters,
+            body: try contract.encodeBody(using: bodyEncoder),
+            authScheme: E.auth,
+            groupHeaders: E.Group.commonHeaders,
+            endpointHeaders: contract.additionalHeaders,
+            accept: "*/*"
+        )
+        let response = try await send(request, endpoint: endpoint, decodeError: E.Group.decodeError)
+        return APIResponse(output: response.body, statusCode: response.status, headers: dictionary(response.headers))
+    }
+
     // MARK: - StreamingAPIExecutable
 
     public func execute<E: StreamingAPIContract>(_ contract: E) -> AsyncThrowingStream<E.Event, Error>
