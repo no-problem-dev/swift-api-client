@@ -290,3 +290,80 @@ final class APIClientImplTests: XCTestCase {
         XCTAssertEqual(mock.recordedRequests.first?.headers["accept"], "text/event-stream")
     }
 }
+
+// MARK: - Scope propagation (ScopedAuthTokenProvider)
+
+/// `getToken(scopes:)` に渡されたスコープを記録するスレッドセーフな箱。
+private final class ScopeRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _scopes: [String]?
+    var scopes: [String]? { lock.lock(); defer { lock.unlock() }; return _scopes }
+    func record(_ value: [String]) { lock.lock(); _scopes = value; lock.unlock() }
+}
+
+private struct RecordingScopedToken: ScopedAuthTokenProvider {
+    let token: String?
+    let recorder: ScopeRecorder
+    func getToken(scopes: [String]) async throws -> String? {
+        recorder.record(scopes)
+        return token
+    }
+}
+
+private enum ScopedGroup: APIContractGroup {
+    static let basePath = "/v1"
+    static let auth: AuthScheme = .bearer
+    static let endpoints: [EndpointDescriptor] = []
+    static let requiredScopes: [String] = ["group.default"]
+}
+
+/// エンドポイント固有スコープを持つ契約。
+private struct ScopedEndpointContract: APIContract, APIInput {
+    typealias Group = ScopedGroup
+    typealias Input = Self
+    typealias Output = TestResponse
+    static let method: APIMethod = .get
+    static let subPath = "/scoped"
+    static let requiredScopes: [String] = ["endpoint.read"]
+    func encodeBody(using encoder: any APIBodyEncoder) throws -> Data? { nil }
+    static func decode(pathParameters: [String: String], queryParameters: [String: String], body: Data?, decoder: any APIBodyDecoder) throws -> Self { Self() }
+}
+
+/// 固有スコープを宣言せずグループ既定を継承する契約。
+private struct GroupScopedContract: APIContract, APIInput {
+    typealias Group = ScopedGroup
+    typealias Input = Self
+    typealias Output = TestResponse
+    static let method: APIMethod = .get
+    static let subPath = "/inherited"
+    func encodeBody(using encoder: any APIBodyEncoder) throws -> Data? { nil }
+    static func decode(pathParameters: [String: String], queryParameters: [String: String], body: Data?, decoder: any APIBodyDecoder) throws -> Self { Self() }
+}
+
+final class APIClientScopeTests: XCTestCase {
+    private let baseURL = URL(string: "https://api.example.com")!
+
+    func testScopedProviderReceivesEndpointScopes() async throws {
+        let recorder = ScopeRecorder()
+        let mock = MockTransport { _ in okResponse(#"{"id":1,"name":"x"}"#) }
+        let client = APIClientImpl(baseURL: baseURL, transport: mock, authTokenProvider: RecordingScopedToken(token: "tkn", recorder: recorder))
+        _ = try await client.executeWithResponse(ScopedEndpointContract())
+        XCTAssertEqual(recorder.scopes, ["endpoint.read"])
+        XCTAssertEqual(mock.recordedRequests.first?.headers["authorization"], "Bearer tkn")
+    }
+
+    func testScopedProviderInheritsGroupScopes() async throws {
+        let recorder = ScopeRecorder()
+        let mock = MockTransport { _ in okResponse(#"{"id":1,"name":"x"}"#) }
+        let client = APIClientImpl(baseURL: baseURL, transport: mock, authTokenProvider: RecordingScopedToken(token: "tkn", recorder: recorder))
+        _ = try await client.executeWithResponse(GroupScopedContract())
+        XCTAssertEqual(recorder.scopes, ["group.default"])
+    }
+
+    func testNonScopedProviderStillWorks() async throws {
+        let mock = MockTransport { _ in okResponse(#"{"id":1,"name":"x"}"#) }
+        let client = APIClientImpl(baseURL: baseURL, transport: mock, authTokenProvider: StaticToken(token: "plain"))
+        _ = try await client.executeWithResponse(ScopedEndpointContract())
+        XCTAssertEqual(mock.recordedRequests.first?.headers["authorization"], "Bearer plain")
+    }
+}

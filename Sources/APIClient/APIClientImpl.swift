@@ -63,6 +63,7 @@ public struct APIClientImpl: APIClient {
             queryParameters: contract.queryParameters,
             body: try contract.encodeBody(using: bodyEncoder),
             authScheme: E.auth,
+            scopes: E.requiredScopes,
             groupHeaders: E.Group.commonHeaders,
             endpointHeaders: contract.additionalHeaders,
             accept: "application/json"
@@ -93,6 +94,7 @@ public struct APIClientImpl: APIClient {
             queryParameters: contract.queryParameters,
             body: try contract.encodeBody(using: bodyEncoder),
             authScheme: E.auth,
+            scopes: E.requiredScopes,
             groupHeaders: E.Group.commonHeaders,
             endpointHeaders: contract.additionalHeaders,
             accept: "*/*"
@@ -115,6 +117,7 @@ public struct APIClientImpl: APIClient {
                         queryParameters: contract.queryParameters,
                         body: try contract.encodeBody(using: bodyEncoder),
                         authScheme: E.auth,
+                        scopes: E.requiredScopes,
                         groupHeaders: E.Group.commonHeaders,
                         endpointHeaders: contract.additionalHeaders,
                         accept: "text/event-stream"
@@ -149,6 +152,7 @@ public struct APIClientImpl: APIClient {
                         queryParameters: contract.queryParameters,
                         body: try contract.encodeBody(using: bodyEncoder),
                         authScheme: E.auth,
+                        scopes: E.requiredScopes,
                         groupHeaders: E.Group.commonHeaders,
                         endpointHeaders: contract.additionalHeaders,
                         accept: "text/event-stream"
@@ -179,6 +183,7 @@ public struct APIClientImpl: APIClient {
         queryParameters: [String: String]?,
         body: Data?,
         authScheme: AuthScheme,
+        scopes: [String],
         groupHeaders: [String: String],
         endpointHeaders: [String: String],
         accept: String
@@ -188,7 +193,7 @@ public struct APIClientImpl: APIClient {
         ) else { throw APIError.invalidURL }
 
         var items = components.queryItems ?? []
-        if case .queryParam(let name) = authScheme, let token = try await authTokenProvider?.getToken() {
+        if case .queryParam(let name) = authScheme, let token = try await resolveToken(scopes: scopes) {
             items.append(URLQueryItem(name: name, value: token))
         }
         if let queryParameters, !queryParameters.isEmpty {
@@ -206,14 +211,22 @@ public struct APIClientImpl: APIClient {
         case .none, .queryParam:
             break
         case .bearer:
-            if let token = try await authTokenProvider?.getToken() { headers["Authorization"] = "Bearer \(token)" }
+            if let token = try await resolveToken(scopes: scopes) { headers["Authorization"] = "Bearer \(token)" }
         case .apiKey(let headerName):
-            if let token = try await authTokenProvider?.getToken() { headers[headerName] = token }
+            if let token = try await resolveToken(scopes: scopes) { headers[headerName] = token }
         }
         for (key, value) in groupHeaders { headers[key] = value }
         for (key, value) in endpointHeaders { headers[key] = value }
 
         return HTTPRequest(method: method, url: url, headers: headers, body: body, timeout: timeout)
+    }
+
+    /// 認証トークンを取得する。プロバイダがスコープ対応なら必要スコープを渡す。
+    private func resolveToken(scopes: [String]) async throws -> String? {
+        if let scoped = authTokenProvider as? ScopedAuthTokenProvider {
+            return try await scoped.getToken(scopes: scopes)
+        }
+        return try await authTokenProvider?.getToken()
     }
 
     private func send(

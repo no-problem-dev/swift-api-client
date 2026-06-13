@@ -15,7 +15,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-docc-plugin", .upToNextMajor(from: "1.4.0")),
-        .package(url: "https://github.com/no-problem-dev/swift-api-contract.git", from: "2.0.0"),
+        .package(url: "https://github.com/no-problem-dev/swift-api-contract.git", from: "2.1.0"),
         .package(url: "https://github.com/no-problem-dev/swift-http-transport.git", from: "1.1.0"),
         .package(url: "https://github.com/no-problem-dev/swift-structured-data.git", from: "1.2.0")
     ],
