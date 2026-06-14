@@ -188,8 +188,12 @@ public struct APIClientImpl: APIClient {
         endpointHeaders: [String: String],
         accept: String
     ) async throws -> HTTPRequest {
+        // path が空の場合 appendingPathComponent("") は末尾スラッシュを付与し、
+        // 完全 URL を baseURL に持つ契約(OpenAI 互換など)で `.../chat/completions/` の
+        // ような不正 URL を生む。空パスは baseURL をそのまま使う。
+        let requestURL = path.isEmpty ? baseURL : baseURL.appendingPathComponent(path)
         guard var components = URLComponents(
-            url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: true
+            url: requestURL, resolvingAgainstBaseURL: true
         ) else { throw APIError.invalidURL }
 
         var items = components.queryItems ?? []

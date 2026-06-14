@@ -154,6 +154,24 @@ private struct StreamContract: StreamingAPIContract, APIInput {
     static func decode(pathParameters: [String: String], queryParameters: [String: String], body: Data?, decoder: any APIBodyDecoder) throws -> Self { Self() }
 }
 
+/// 完全 URL を baseURL に持つ契約(OpenAI 互換)の再現: basePath も subPath も空。
+private enum EmptyPathAPIGroup: APIContractGroup {
+    static let basePath = ""
+    static let auth: AuthScheme = .bearer
+    static let endpoints: [EndpointDescriptor] = []
+    static func decodeError(statusCode: Int, data: Data, headers: [String: String], decoder: any APIBodyDecoder) -> (any Error)? { nil }
+}
+
+private struct EmptyPathContract: APIContract, APIInput {
+    typealias Group = EmptyPathAPIGroup
+    typealias Input = Self
+    typealias Output = TestResponse
+    static let method: APIMethod = .post
+    static let subPath = ""
+    func encodeBody(using encoder: any APIBodyEncoder) throws -> Data? { nil }
+    static func decode(pathParameters: [String: String], queryParameters: [String: String], body: Data?, decoder: any APIBodyDecoder) throws -> Self { Self() }
+}
+
 private struct StaticToken: AuthTokenProvider { let token: String?; func getToken() async throws -> String? { token } }
 
 private func okResponse(_ json: String) -> HTTPResponse {
@@ -196,6 +214,19 @@ final class APIClientImplTests: XCTestCase {
         let client = APIClientImpl(baseURL: baseURL, transport: mock)
         _ = try await client.execute(QueryContract(page: 3))
         XCTAssertEqual(mock.recordedRequests.first?.url.query, "page=3")
+    }
+
+    /// 回帰ゲート: path が空の契約(完全 URL を baseURL に持つ OpenAI 互換)で
+    /// 末尾スラッシュを付与しないこと。Groq の `Unknown request URL` 障害の再発防止。
+    func testEmptyPathDoesNotAddTrailingSlash() async throws {
+        let mock = MockTransport { _ in okResponse(#"{"id":1,"name":"x"}"#) }
+        let fullURL = URL(string: "https://api.groq.com/openai/v1/chat/completions")!
+        let client = APIClientImpl(baseURL: fullURL, transport: mock)
+        _ = try await client.executeWithResponse(EmptyPathContract())
+        XCTAssertEqual(
+            mock.recordedRequests.first?.url.absoluteString,
+            "https://api.groq.com/openai/v1/chat/completions"
+        )
     }
 
     func testBearerAuthHeader() async throws {
