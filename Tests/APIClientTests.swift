@@ -11,22 +11,12 @@ final class APIEndpointTests: XCTestCase {
         let endpoint = APIEndpoint(path: "/v1/users")
         XCTAssertEqual(endpoint.path, "/v1/users")
         XCTAssertEqual(endpoint.method, .get)
-        XCTAssertNil(endpoint.headers)
-        XCTAssertNil(endpoint.body)
-        XCTAssertNil(endpoint.queryItems)
     }
 
     func testInitWithAllParameters() {
-        let bodyData = Data("test".utf8)
-        let endpoint = APIEndpoint(
-            path: "/v1/users", method: .post,
-            headers: ["X-Custom": "value"], body: bodyData,
-            queryItems: [URLQueryItem(name: "page", value: "1")]
-        )
+        let endpoint = APIEndpoint(path: "/v1/users", method: .post)
+        XCTAssertEqual(endpoint.path, "/v1/users")
         XCTAssertEqual(endpoint.method, .post)
-        XCTAssertEqual(endpoint.headers?["X-Custom"], "value")
-        XCTAssertEqual(endpoint.body, bodyData)
-        XCTAssertEqual(endpoint.queryItems?.first?.value, "1")
     }
 }
 
@@ -172,7 +162,7 @@ private struct EmptyPathContract: APIContract, APIInput {
     static func decode(pathParameters: [String: String], queryParameters: [String: String], body: Data?, decoder: any APIBodyDecoder) throws -> Self { Self() }
 }
 
-private struct StaticToken: AuthTokenProvider { let token: String?; func getToken() async throws -> String? { token } }
+private struct StaticToken: AuthTokenProvider { let token: String?; func fetchToken() async throws -> String? { token } }
 
 private func okResponse(_ json: String) -> HTTPResponse {
     HTTPResponse(status: 200, headers: ["Content-Type": "application/json"], body: Data(json.utf8))
@@ -324,7 +314,7 @@ final class APIClientImplTests: XCTestCase {
 
 // MARK: - Scope propagation (ScopedAuthTokenProvider)
 
-/// `getToken(scopes:)` に渡されたスコープを記録するスレッドセーフな箱。
+/// `fetchToken(scopes:)` に渡されたスコープを記録するスレッドセーフな箱。
 private final class ScopeRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var _scopes: [String]?
@@ -335,7 +325,7 @@ private final class ScopeRecorder: @unchecked Sendable {
 private struct RecordingScopedToken: ScopedAuthTokenProvider {
     let token: String?
     let recorder: ScopeRecorder
-    func getToken(scopes: [String]) async throws -> String? {
+    func fetchToken(scopes: [String]) async throws -> String? {
         recorder.record(scopes)
         return token
     }

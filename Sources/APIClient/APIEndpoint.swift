@@ -1,25 +1,22 @@
 import APIContract
 import Foundation
 
-/// APIエンドポイント
+/// HTTPイベント・ログのエンドポイント識別子。
+///
+/// `APIClientImpl` が ``HTTPEvent`` や ``HTTPLog`` を生成する際に、
+/// どのエンドポイントで何が起きたかを伝えるための軽量な値型。
+/// リクエスト構築には使われない（リクエストは ``APIContract`` 側が担う）。
 public struct APIEndpoint: Sendable {
+    /// パス文字列（例: `/v1/users`）
     public let path: String
+    /// HTTP メソッド
     public let method: APIMethod
-    public let headers: [String: String]?
-    public let body: Data?
-    public let queryItems: [URLQueryItem]?
 
     public init(
         path: String,
-        method: APIMethod = .get,
-        headers: [String: String]? = nil,
-        body: Data? = nil,
-        queryItems: [URLQueryItem]? = nil
+        method: APIMethod = .get
     ) {
         self.path = path
         self.method = method
-        self.headers = headers
-        self.body = body
-        self.queryItems = queryItems
     }
 }

@@ -228,9 +228,9 @@ public struct APIClientImpl: APIClient {
     /// 認証トークンを取得する。プロバイダがスコープ対応なら必要スコープを渡す。
     private func resolveToken(scopes: [String]) async throws -> String? {
         if let scoped = authTokenProvider as? ScopedAuthTokenProvider {
-            return try await scoped.getToken(scopes: scopes)
+            return try await scoped.fetchToken(scopes: scopes)
         }
-        return try await authTokenProvider?.getToken()
+        return try await authTokenProvider?.fetchToken()
     }
 
     private func send(

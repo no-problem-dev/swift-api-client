@@ -13,17 +13,27 @@
 
 `swift-api-client` は、Swift アプリケーションで HTTP API 呼び出しをシンプルかつ型安全に行うためのパッケージです。iOS および macOS プラットフォームに対応し、モダンな並行処理機能をサポートしています。
 
+[swift-api-contract](https://github.com/no-problem-dev/swift-api-contract) が定義する `APIContract` プロトコルをベースにしており、コンパイル時の型チェックでリクエスト/レスポンスの整合性を保証します。
+
 ### 主な機能
 
-- ✅ **モダンな async/await API** - Swift 6.0 の並行処理機能をフル活用
-- ✅ **型安全なリクエスト/レスポンス** - コンパイル時の型チェックで安全性を保証
-- ✅ **自動 JSON デコーディング** - Codable を使った簡単なレスポンス処理
-- ✅ **柔軟なエラーハンドリング** - 詳細なエラー情報を提供
-- ✅ **認証サポート** - トークンプロバイダーによる認証統合
-- ✅ **HTTP イベントストリーム** - 認証エラー・レート制限等の重要イベントをAsyncStreamで通知
-- ✅ **HTTP ログストリーム** - 全リクエスト/レスポンスをAsyncStreamで監視可能
-- ✅ **ゼロ依存** - 外部ライブラリを使わない軽量設計
-- ✅ **クロスプラットフォーム** - iOS および macOS 対応
+- **モダンな async/await API** - Swift 6.0 の並行処理機能をフル活用
+- **型安全なリクエスト/レスポンス** - `APIContract` による コンパイル時の型チェック
+- **自動 JSON デコーディング** - Codable を使った簡単なレスポンス処理
+- **柔軟なエラーハンドリング** - カスタムエラーデコードをグループ単位で定義可能
+- **認証サポート** - Bearer / ApiKey / QueryParam 認証をトークンプロバイダーで統合
+- **HTTP イベントストリーム** - 認証エラー・レート制限等の重要イベントを AsyncStream で通知
+- **HTTP ログストリーム** - 全リクエスト/レスポンスを AsyncStream で監視可能
+- **SSE ストリーミング** - Server-Sent Events による型付き/生ストリームに対応
+- **クロスプラットフォーム** - iOS および macOS 対応
+
+## 依存パッケージ
+
+| パッケージ | 用途 |
+|---|---|
+| [swift-api-contract](https://github.com/no-problem-dev/swift-api-contract) | API 契約の型定義（`APIContract` / `APIContractGroup` 等） |
+| [swift-http-transport](https://github.com/no-problem-dev/swift-http-transport) | HTTP 送受信 / リトライ / SSE |
+| [swift-structured-data](https://github.com/no-problem-dev/swift-structured-data) | JSON エンコード・デコード |
 
 ## 必要要件
 
@@ -50,94 +60,88 @@ dependencies: [
 
 ## クイックスタート
 
-最もシンプルな使用例：
+このパッケージは `APIContract` プロトコルに適合した型でリクエストを定義します。
 
 ```swift
 import APIClient
+import APIContract
 
-// API クライアントを作成
+// 1. レスポンス型を定義
+struct User: Codable, Sendable {
+    let id: Int
+    let name: String
+}
+
+// 2. API グループを定義（共通設定）
+enum UserAPI: APIContractGroup {
+    static let basePath = "/v1"
+    static let auth: AuthScheme = .bearer
+    static let endpoints: [EndpointDescriptor] = []
+    static func decodeError(
+        statusCode: Int, data: Data,
+        headers: [String: String], decoder: any APIBodyDecoder
+    ) -> (any Error)? { nil }
+}
+
+// 3. エンドポイント契約を定義
+struct GetUser: APIContract, APIInput {
+    typealias Group = UserAPI
+    typealias Input = Self
+    typealias Output = User
+    static let method: APIMethod = .get
+    static let subPath = "/users/1"
+    func encodeBody(using encoder: any APIBodyEncoder) throws -> Data? { nil }
+    static func decode(
+        pathParameters: [String: String],
+        queryParameters: [String: String],
+        body: Data?, decoder: any APIBodyDecoder
+    ) throws -> Self { Self() }
+}
+
+// 4. クライアントを作成してリクエストを実行
 let client = APIClientImpl(baseURL: URL(string: "https://api.example.com")!)
-
-// エンドポイントを定義
-let endpoint = APIEndpoint(
-    path: "/users/123",
-    method: .get
-)
-
-// リクエストを実行
-let data = try await client.request(endpoint)
+let response = try await client.executeWithResponse(GetUser())
+print(response.output.name)  // User.name
 ```
 
 ## 使い方
 
-### 基本的な GET リクエスト
-
-```swift
-import APIClient
-
-// レスポンス型を定義
-struct User: Codable {
-    let id: String
-    let name: String
-    let email: String
-}
-
-// API クライアントを作成
-let client = APIClientImpl(baseURL: URL(string: "https://api.example.com")!)
-
-// エンドポイントを定義
-let endpoint = APIEndpoint(
-    path: "/users/123",
-    method: .get
-)
-
-// リクエストを実行してデコード
-let user: User = try await client.request(endpoint)
-print(user.name)
-```
-
 ### POST リクエスト（JSON ボディ付き）
 
 ```swift
-struct CreateUserRequest: Codable {
+struct CreateUserBody: Codable, Sendable {
     let name: String
     let email: String
 }
 
-let requestBody = CreateUserRequest(name: "John Doe", email: "john@example.com")
-let jsonData = try JSONEncoder().encode(requestBody)
+struct CreateUser: APIContract, APIInput {
+    typealias Group = UserAPI
+    typealias Input = Self
+    typealias Output = User
+    static let method: APIMethod = .post
+    static let subPath = "/users"
+    let body: CreateUserBody
+    func encodeBody(using encoder: any APIBodyEncoder) throws -> Data? {
+        try encoder.encode(body)
+    }
+    static func decode(
+        pathParameters: [String: String], queryParameters: [String: String],
+        body: Data?, decoder: any APIBodyDecoder
+    ) throws -> Self { fatalError("server-only") }
+}
 
-let endpoint = APIEndpoint(
-    path: "/users",
-    method: .post,
-    headers: ["Content-Type": "application/json"],
-    body: jsonData
+let response = try await client.executeWithResponse(
+    CreateUser(body: CreateUserBody(name: "Ada", email: "ada@example.com"))
 )
-
-let newUser: User = try await client.request(endpoint)
-```
-
-### クエリパラメータ付きリクエスト
-
-```swift
-let endpoint = APIEndpoint(
-    path: "/users",
-    method: .get,
-    queryItems: [
-        URLQueryItem(name: "page", value: "1"),
-        URLQueryItem(name: "limit", value: "20")
-    ]
-)
-
-let users: [User] = try await client.request(endpoint)
+let newUser = response.output
 ```
 
 ### エラーハンドリング
 
 ```swift
 do {
-    let user: User = try await client.request(endpoint)
-    print("Success: \(user.name)")
+    let response = try await client.executeWithResponse(GetUser())
+    print(response.output.name)
 } catch APIError.unauthorized {
     print("認証エラー")
 } catch APIError.networkError(let error) {
@@ -155,8 +159,8 @@ do {
 
 ```swift
 // トークンプロバイダーを実装
-class MyTokenProvider: AuthTokenProvider {
-    func getToken() async throws -> String? {
+struct MyTokenProvider: AuthTokenProvider {
+    func fetchToken() async throws -> String? {
         // トークン取得ロジック（例：Keychain から取得）
         return "your-auth-token"
     }
@@ -167,9 +171,33 @@ let client = APIClientImpl(
     baseURL: URL(string: "https://api.example.com")!,
     authTokenProvider: MyTokenProvider()
 )
+// リクエスト時に自動的に Authorization: Bearer ヘッダーが追加される
+```
 
-// リクエスト時に自動的に Authorization ヘッダーが追加されます
-let user: User = try await client.request(endpoint)
+### バイナリレスポンス（音声・画像）
+
+```swift
+// executeRaw は JSON デコードせず生の Data を返す
+let response = try await client.executeRaw(GetAudioContract())
+let audioData = response.output  // Data
+```
+
+### SSE ストリーミング
+
+型付きストリーム（単一イベント型の場合）：
+
+```swift
+for try await event in client.execute(StreamContract()) {
+    print(event.delta)
+}
+```
+
+生ストリーム（Anthropic など複数イベント型の場合）：
+
+```swift
+for try await sse in client.executeEventStream(GetStreamContract()) {
+    print(sse.event ?? "message", sse.data)
+}
 ```
 
 ### HTTP イベントの監視
@@ -177,9 +205,8 @@ let user: User = try await client.request(endpoint)
 重要なHTTPレスポンス（401, 403, 429, 503, 5xx）をアプリ全体で監視できます。
 
 ```swift
-// 認証エラーやサービス停止を一元的にハンドリング
 Task {
-    for await event in await client.events {
+    for await event in client.events {
         switch event {
         case .unauthorized:
             await authManager.handleLogout()
@@ -196,19 +223,17 @@ Task {
 
 ### HTTP ログの監視
 
-全リクエスト/レスポンスをAsyncStreamで監視できます。
-
 ```swift
-// デバッグ用コンソール出力（CustomStringConvertibleによる整形済み出力）
+// デバッグ用コンソール出力（CustomStringConvertible による整形済み出力）
 Task {
-    for await log in await client.logs {
-        print(log)  // 自動的に整形されたログが出力されます
+    for await log in client.logs {
+        print(log)
     }
 }
 
-// カスタム処理（Analytics送信など）
+// カスタム処理（Analytics 送信など）
 Task {
-    for await log in await client.logs {
+    for await log in client.logs {
         switch log {
         case .success(let endpoint, let statusCode, _):
             analytics.trackSuccess(endpoint: endpoint.path, statusCode: statusCode)

@@ -16,7 +16,14 @@ public protocol APIClient: APIExecutable, StreamingAPIExecutable {
 /// 日付ワイヤ形式の指定（内部 Codec の中立 enum を再公開）。
 public typealias DateStrategy = DateCodingStrategy
 
-/// オブジェクトキーの変換スタイル（内部の structured-data 戦略へ写像）。
+/// JSON オブジェクトキーの変換スタイル。
+///
+/// `APIClientImpl` の `keyStyle:` 引数で指定する。エンコード（リクエストボディ）と
+/// デコード（レスポンスボディ）の両方に対称に適用される。
+///
+/// - `default`: Swift のプロパティ名をそのまま使う（`camelCase`）
+/// - `snakeCase`: `camelCase` → `snake_case` に変換（多くの REST API のデフォルト）
+/// - `kebabCase`: `camelCase` → `kebab-case` に変換
 public enum APIKeyStyle: Sendable {
     case `default`
     case snakeCase
