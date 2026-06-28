@@ -1,9 +1,16 @@
 import Foundation
 
-/// HTTPリクエスト/レスポンスログ
+/// HTTP リクエスト/レスポンスのログエントリ。
+///
+/// `APIClientImpl.logs` から `AsyncStream` で受信する。
+/// 成功・HTTP エラー・デコードエラーの 3 種を区別し、
+/// `CustomStringConvertible` による整形済み文字列出力をサポートする。
 public enum HTTPLog: Sendable {
+    /// 2xx 成功レスポンス。
     case success(endpoint: APIEndpoint, statusCode: Int, data: Data)
+    /// 非 2xx HTTP エラーレスポンス（4xx / 5xx）。
     case httpError(endpoint: APIEndpoint, statusCode: Int, data: Data)
+    /// レスポンス JSON のデコード失敗。`targetType` は期待していた Swift 型名。
     case decodingError(endpoint: APIEndpoint, error: String, data: Data, targetType: String)
 }
 

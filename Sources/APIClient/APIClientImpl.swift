@@ -24,6 +24,21 @@ public struct APIClientImpl: APIClient {
     public let logs: AsyncStream<HTTPLog>
     private let logContinuation: AsyncStream<HTTPLog>.Continuation
 
+    /// `APIClientImpl` を生成する。
+    ///
+    /// すべてのリクエストに共通する設定（ベース URL・認証・タイムアウト・直列化スタイル）を
+    /// 一度だけ渡して初期化する。Transport は差し替え可能で、テスト時にモックに置換できる。
+    ///
+    /// - Parameters:
+    ///   - baseURL: すべてのリクエストの基底 URL。パスは `APIContract.subPath` で相対解決される
+    ///   - transport: HTTP 送受信・SSE ストリームを担う Transport（デフォルト: `URLSessionTransport`）
+    ///   - authTokenProvider: Bearer / ApiKey / QueryParam 認証トークンのプロバイダー。`nil` で認証なし
+    ///   - timeout: リクエストタイムアウト（秒）
+    ///   - defaultHeaders: すべてのリクエストに付与する固定ヘッダー
+    ///   - retryPolicy: 一時的な失敗に対するリトライ戦略（デフォルト: リトライなし）
+    ///   - rateLimitMapping: 429 レスポンスの `Retry-After` ヘッダーマッピング
+    ///   - keyStyle: JSON キーの変換スタイル（エンコード・デコード両方に適用）
+    ///   - dateStrategy: 日付のエンコード・デコード形式
     public init(
         baseURL: URL,
         transport: any HTTPTransport & HTTPStreamingTransport = URLSessionTransport(),
@@ -53,6 +68,15 @@ public struct APIClientImpl: APIClient {
 
     // MARK: - APIExecutable
 
+    /// `APIContract` 準拠型を実行し、JSON デコード済みレスポンスを返す。
+    ///
+    /// リクエスト構築・認証ヘッダー付与・リトライ・エラーマッピングを自動で行う。
+    /// デコード失敗時は `logs` ストリームに `.decodingError` を流したうえで
+    /// `APIError.decodingError` を throw する。
+    ///
+    /// - Parameter contract: 実行するエンドポイント契約
+    /// - Returns: デコード済み出力とメタデータ（ステータスコード・レスポンスヘッダー）
+    /// - Throws: ``APIError``
     public func executeWithResponse<E: APIContract>(_ contract: E) async throws -> APIResponse<E.Output>
         where E.Input == E, E: APIInput
     {
@@ -105,6 +129,13 @@ public struct APIClientImpl: APIClient {
 
     // MARK: - StreamingAPIExecutable
 
+    /// `StreamingAPIContract` 準拠型を実行し、型付きイベントの `AsyncThrowingStream` を返す。
+    ///
+    /// SSE レスポンスの各メッセージを `E.Event` にデコードして逐次配信する。
+    /// `[DONE]` などの終端マーカーや空ペイロードは自動スキップする。
+    ///
+    /// - Parameter contract: 実行するストリーミングエンドポイント契約
+    /// - Returns: 型付きイベントを逐次生成する `AsyncThrowingStream`
     public func execute<E: StreamingAPIContract>(_ contract: E) -> AsyncThrowingStream<E.Event, Error>
         where E.Input == E, E: APIInput
     {

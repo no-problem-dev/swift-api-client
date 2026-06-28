@@ -12,6 +12,11 @@ public struct APIEndpoint: Sendable {
     /// HTTP メソッド
     public let method: APIMethod
 
+    /// エンドポイント識別子を生成する。
+    ///
+    /// - Parameters:
+    ///   - path: パス文字列（例: `/v1/users`）。
+    ///   - method: HTTP メソッド。省略時は `.get`。
     public init(
         path: String,
         method: APIMethod = .get

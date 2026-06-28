@@ -7,6 +7,7 @@ import Foundation
 ///
 /// スコープ分岐が必要な場合は ``ScopedAuthTokenProvider`` を使う。
 public protocol AuthTokenProvider: Sendable {
+    /// 認証トークンを取得する。`nil` を返すと認証なしで送信し、throw すると取得失敗として扱う。
     func fetchToken() async throws -> String?
 }
 
@@ -20,6 +21,7 @@ public protocol AuthTokenProvider: Sendable {
 /// 表す。`scopes` は別トークンの選択ではなく、付与済みスコープの事前検証
 /// （インクリメンタル認可の UX 駆動）に使うのが一般的。
 public protocol ScopedAuthTokenProvider: AuthTokenProvider {
+    /// 指定スコープに対するトークンを取得する。`scopes` は契約の `requiredScopes` が渡され、付与済みスコープの事前検証に使う。
     func fetchToken(scopes: [String]) async throws -> String?
 }
 

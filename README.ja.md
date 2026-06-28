@@ -1,53 +1,53 @@
-English | [日本語](./README.ja.md)
+[English](./README.md) | 日本語
 
 # swift-api-client
 
-A lightweight Swift HTTP API client with async/await support.
+モダンな async/await をサポートした軽量な Swift 製 HTTP API クライアントパッケージ
 
 ![Swift](https://img.shields.io/badge/Swift-6.0-orange.svg)
 ![Platforms](https://img.shields.io/badge/Platforms-iOS%2017.0+%20%7C%20macOS%2014.0+-blue.svg)
 ![SPM](https://img.shields.io/badge/Swift_Package_Manager-compatible-brightgreen.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-📚 **[Full Documentation](https://no-problem-dev.github.io/swift-api-client/documentation/apiclient/)**
+📚 **[完全なドキュメント](https://no-problem-dev.github.io/swift-api-client/documentation/apiclient/)**
 
-## Overview
+## 概要
 
-`swift-api-client` is a package for making HTTP API calls in Swift applications simply and type-safely. It supports iOS and macOS platforms with modern Swift concurrency.
+`swift-api-client` は、Swift アプリケーションで HTTP API 呼び出しをシンプルかつ型安全に行うためのパッケージ。iOS および macOS プラットフォームに対応し、モダンな並行処理機能をサポートする。
 
-Built on the `APIContract` protocol from [swift-api-contract](https://github.com/no-problem-dev/swift-api-contract), it guarantees request/response consistency with compile-time type checking.
+[swift-api-contract](https://github.com/no-problem-dev/swift-api-contract) が定義する `APIContract` プロトコルをベースにしており、コンパイル時の型チェックでリクエスト/レスポンスの整合性を保証する。
 
-### Key Features
+### 主な機能
 
-- **Modern async/await API** — Full use of Swift 6.0 concurrency
-- **Type-safe requests/responses** — Compile-time type checking via `APIContract`
-- **Automatic JSON decoding** — Simple response handling with `Codable`
-- **Flexible error handling** — Custom error decoding definable per API group
-- **Authentication support** — Bearer / ApiKey / QueryParam auth via token provider
-- **HTTP event stream** — Critical events (auth errors, rate limiting, etc.) delivered via `AsyncStream`
-- **HTTP log stream** — Monitor all requests/responses via `AsyncStream`
-- **SSE streaming** — Typed and raw Server-Sent Events streams
-- **Cross-platform** — iOS and macOS support
+- **モダンな async/await API** - Swift 6.0 の並行処理機能をフル活用
+- **型安全なリクエスト/レスポンス** - `APIContract` による コンパイル時の型チェック
+- **自動 JSON デコーディング** - Codable を使った簡単なレスポンス処理
+- **柔軟なエラーハンドリング** - カスタムエラーデコードをグループ単位で定義可能
+- **認証サポート** - Bearer / ApiKey / QueryParam 認証をトークンプロバイダーで統合
+- **HTTP イベントストリーム** - 認証エラー・レート制限等の重要イベントを AsyncStream で通知
+- **HTTP ログストリーム** - 全リクエスト/レスポンスを AsyncStream で監視可能
+- **SSE ストリーミング** - Server-Sent Events による型付き/生ストリームに対応
+- **クロスプラットフォーム** - iOS および macOS 対応
 
-## Dependencies
+## 依存パッケージ
 
-| Package | Purpose |
+| パッケージ | 用途 |
 |---|---|
-| [swift-api-contract](https://github.com/no-problem-dev/swift-api-contract) | API contract type definitions (`APIContract` / `APIContractGroup`, etc.) |
-| [swift-http-transport](https://github.com/no-problem-dev/swift-http-transport) | HTTP send/receive / retry / SSE |
-| [swift-structured-data](https://github.com/no-problem-dev/swift-structured-data) | JSON encoding and decoding |
+| [swift-api-contract](https://github.com/no-problem-dev/swift-api-contract) | API 契約の型定義（`APIContract` / `APIContractGroup` 等） |
+| [swift-http-transport](https://github.com/no-problem-dev/swift-http-transport) | HTTP 送受信 / リトライ / SSE |
+| [swift-structured-data](https://github.com/no-problem-dev/swift-structured-data) | JSON エンコード・デコード |
 
-## Requirements
+## 必要要件
 
 - iOS 17.0+
 - macOS 14.0+
 - Swift 6.0+
 
-## Installation
+## インストール
 
 ### Swift Package Manager
 
-Add the following to your `Package.swift`:
+`Package.swift` に以下を追加する：
 
 ```swift
 dependencies: [
@@ -55,26 +55,26 @@ dependencies: [
 ]
 ```
 
-Or in Xcode:
+または Xcode で：
 1. File > Add Package Dependencies
-2. Enter the package URL: `https://github.com/no-problem-dev/swift-api-client.git`
-3. Select version: `2.3.1` or later
+2. パッケージ URL を入力: `https://github.com/no-problem-dev/swift-api-client.git`
+3. バージョンを選択: `2.3.1` 以降
 
-## Quick Start
+## クイックスタート
 
-This package defines requests with types that conform to the `APIContract` protocol.
+このパッケージは `APIContract` プロトコルに適合した型でリクエストを定義する。
 
 ```swift
 import APIClient
 import APIContract
 
-// 1. Define your response type
+// 1. レスポンス型を定義
 struct User: Codable, Sendable {
     let id: Int
     let name: String
 }
 
-// 2. Define an API group (shared settings)
+// 2. API グループを定義（共通設定）
 enum UserAPI: APIContractGroup {
     static let basePath = "/v1"
     static let auth: AuthScheme = .bearer
@@ -85,7 +85,7 @@ enum UserAPI: APIContractGroup {
     ) -> (any Error)? { nil }
 }
 
-// 3. Define the endpoint contract
+// 3. エンドポイント契約を定義
 struct GetUser: APIContract, APIInput {
     typealias Group = UserAPI
     typealias Input = Self
@@ -100,15 +100,15 @@ struct GetUser: APIContract, APIInput {
     ) throws -> Self { Self() }
 }
 
-// 4. Create a client and execute the request
+// 4. クライアントを作成してリクエストを実行
 let client = APIClientImpl(baseURL: URL(string: "https://api.example.com")!)
 let response = try await client.executeWithResponse(GetUser())
 print(response.output.name)  // User.name
 ```
 
-## Usage
+## 使い方
 
-### POST Request (with JSON body)
+### POST リクエスト（JSON ボディ付き）
 
 ```swift
 struct CreateUserBody: Codable, Sendable {
@@ -138,55 +138,55 @@ let response = try await client.executeWithResponse(
 let newUser = response.output
 ```
 
-### Error Handling
+### エラーハンドリング
 
 ```swift
 do {
     let response = try await client.executeWithResponse(GetUser())
     print(response.output.name)
 } catch APIError.unauthorized {
-    print("Authentication error")
+    print("認証エラー")
 } catch APIError.networkError(let error) {
-    print("Network error: \(error.localizedDescription)")
+    print("ネットワークエラー: \(error.localizedDescription)")
 } catch APIError.httpError(let statusCode, _) {
-    print("HTTP error: \(statusCode)")
+    print("HTTP エラー: \(statusCode)")
 } catch APIError.decodingError(let error) {
-    print("Decoding error: \(error.localizedDescription)")
+    print("デコードエラー: \(error.localizedDescription)")
 } catch {
-    print("Unexpected error: \(error)")
+    print("予期しないエラー: \(error)")
 }
 ```
 
-### Using an Authentication Token
+### 認証トークンの使用
 
 ```swift
-// Implement a token provider
+// トークンプロバイダーを実装
 struct MyTokenProvider: AuthTokenProvider {
     func fetchToken() async throws -> String? {
-        // Token retrieval logic (e.g., from Keychain)
+        // トークン取得ロジック（例：Keychain から取得）
         return "your-auth-token"
     }
 }
 
-// Pass the token provider when creating the client
+// クライアント作成時にトークンプロバイダーを指定
 let client = APIClientImpl(
     baseURL: URL(string: "https://api.example.com")!,
     authTokenProvider: MyTokenProvider()
 )
-// Authorization: Bearer header is added automatically on each request
+// リクエスト時に自動的に Authorization: Bearer ヘッダーが追加される
 ```
 
-### Binary Response (audio, images)
+### バイナリレスポンス（音声・画像）
 
 ```swift
-// executeRaw returns raw Data without JSON decoding
+// executeRaw は JSON デコードせず生の Data を返す
 let response = try await client.executeRaw(GetAudioContract())
 let audioData = response.output  // Data
 ```
 
-### SSE Streaming
+### SSE ストリーミング
 
-Typed stream (single event type):
+型付きストリーム（単一イベント型の場合）：
 
 ```swift
 for try await event in client.execute(StreamContract()) {
@@ -194,7 +194,7 @@ for try await event in client.execute(StreamContract()) {
 }
 ```
 
-Raw stream (multiple event types, e.g., Anthropic):
+生ストリーム（Anthropic など複数イベント型の場合）：
 
 ```swift
 for try await sse in client.executeEventStream(GetStreamContract()) {
@@ -202,9 +202,9 @@ for try await sse in client.executeEventStream(GetStreamContract()) {
 }
 ```
 
-### Monitoring HTTP Events
+### HTTP イベントの監視
 
-Monitor critical HTTP responses (401, 403, 429, 503, 5xx) application-wide:
+重要な HTTP レスポンス（401, 403, 429, 503, 5xx）をアプリ全体で監視できる。
 
 ```swift
 Task {
@@ -213,7 +213,7 @@ Task {
         case .unauthorized:
             await authManager.handleLogout()
         case .rateLimited(_, let retryAfter, _):
-            print("Rate limited: retry after \(retryAfter ?? 0)s")
+            print("レート制限: \(retryAfter ?? 0)秒後にリトライ")
         case .serviceUnavailable:
             await router.showMaintenanceScreen()
         default:
@@ -223,17 +223,17 @@ Task {
 }
 ```
 
-### Monitoring HTTP Logs
+### HTTP ログの監視
 
 ```swift
-// Debug console output (formatted via CustomStringConvertible)
+// デバッグ用コンソール出力（CustomStringConvertible による整形済み出力）
 Task {
     for await log in client.logs {
         print(log)
     }
 }
 
-// Custom handling (e.g., sending to Analytics)
+// カスタム処理（Analytics 送信など）
 Task {
     for await log in client.logs {
         switch log {
@@ -248,10 +248,10 @@ Task {
 }
 ```
 
-## License
+## ライセンス
 
-This project is released under the MIT License. See [LICENSE](LICENSE) for details.
+MIT ライセンスの下で公開している。詳細は [LICENSE](LICENSE) ファイルを参照。
 
-## Support
+## サポート
 
-For bug reports or feature requests, please [open an issue on GitHub](https://github.com/no-problem-dev/swift-api-client/issues).
+問題の報告や機能リクエストは [GitHub Issues](https://github.com/no-problem-dev/swift-api-client/issues) へ。
