@@ -1,5 +1,5 @@
-@_exported import APIContract
-@_exported import HTTPTransport
+import APIContract
+import HTTPTransport
 import Foundation
 import StructuredDataCore
 
