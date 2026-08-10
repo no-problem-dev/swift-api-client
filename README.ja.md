@@ -51,7 +51,7 @@
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/no-problem-dev/swift-api-client.git", from: "2.3.1")
+    .package(url: "https://github.com/no-problem-dev/swift-api-client.git", from: "3.0.0")
 ]
 ```
 
