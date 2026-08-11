@@ -8,6 +8,8 @@ published verbatim as the body of the matching GitHub Release.
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-08-11
+
 ### Changed
 
 - Raised the swift-http-transport pin to 2.1.0 and wraps the injected transport in

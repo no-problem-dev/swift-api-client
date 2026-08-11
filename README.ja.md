@@ -61,7 +61,7 @@ iOS 17.0+ · macOS 14.0+ · Linux · Swift 6.0+
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/no-problem-dev/swift-api-client.git", from: "4.0.0")
+    .package(url: "https://github.com/no-problem-dev/swift-api-client.git", from: "5.0.0")
 ]
 ```
 
