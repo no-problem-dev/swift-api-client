@@ -1,22 +1,26 @@
 import APIContract
 import Foundation
 
-/// HTTPイベント・ログのエンドポイント識別子。
+/// The label on an ``HTTPEvent`` or ``HTTPLog`` saying which call produced it.
 ///
-/// `APIClientImpl` が ``HTTPEvent`` や ``HTTPLog`` を生成する際に、
-/// どのエンドポイントで何が起きたかを伝えるための軽量な値型。
-/// リクエスト構築には使われない（リクエストは ``APIContract`` 側が担う）。
+/// Telemetry only. Nothing here is used to build a request — the contract owns the
+/// method and path that go on the wire — so this is a value to group log lines and
+/// metrics by, not a request you can send.
 public struct APIEndpoint: Sendable {
-    /// パス文字列（例: `/v1/users`）
+    /// The contract's path with its parameters already substituted, without the base URL: `/v1/users/42`.
+    ///
+    /// Substitution means this is high-cardinality. Aggregating analytics on it produces
+    /// one bucket per user id; group by contract type instead, and keep the path for
+    /// reading individual log lines.
     public let path: String
-    /// HTTP メソッド
+    /// The method the request was sent with, taken from the contract.
     public let method: APIMethod
 
-    /// エンドポイント識別子を生成する。
+    /// Creates a label by hand, which outside of tests is rarely what you want — the client fills these in.
     ///
     /// - Parameters:
-    ///   - path: パス文字列（例: `/v1/users`）。
-    ///   - method: HTTP メソッド。省略時は `.get`。
+    ///   - path: A resolved path such as `/v1/users`.
+    ///   - method: Defaults to `.get`.
     public init(
         path: String,
         method: APIMethod = .get

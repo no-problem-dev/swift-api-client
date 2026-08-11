@@ -3,11 +3,18 @@ import Foundation
 import HTTPTransport
 import StructuredDataCore
 
-/// APIクライアント実装。
+/// The client: it assembles requests, applies auth, maps errors, and emits telemetry — and performs no I/O itself.
 ///
-/// Transport(HTTP送受信)・Codec(直列化)・Resilience(リトライ/ログ)を分離した薄い
-/// Orchestrator。送受信は注入された ``HTTPTransport`` を通り、直列化は内部で
-/// swift-structured-data に固定される(外部からは選べない=隠蔽)。
+/// Sending belongs to the injected `HTTPTransport`; retry and rate-limit handling are a
+/// decorator wrapped around it; serialization is fixed to swift-structured-data and is
+/// deliberately not selectable — `keyStyle` and `dateStrategy` are the whole surface,
+/// rather than a coder you pass in.
+///
+/// Two consequences of it being a `struct`. Copies share one `events` stream and one
+/// `logs` stream, because the copies hold the same stream continuations, so building a
+/// second client from the first does not give you a second telemetry channel. And
+/// nothing here is stateful across calls: a token is fetched per call, not cached.
+/// Construct one client per base URL and inject it.
 public struct APIClientImpl: APIClient {
     private let baseURL: URL
     private let transport: any HTTPTransport & HTTPStreamingTransport
@@ -24,21 +31,30 @@ public struct APIClientImpl: APIClient {
     public let logs: AsyncStream<HTTPLog>
     private let logContinuation: AsyncStream<HTTPLog>.Continuation
 
-    /// `APIClientImpl` を生成する。
+    /// Creates a client for one base URL; contracts supply everything that varies per call.
     ///
-    /// すべてのリクエストに共通する設定（ベース URL・認証・タイムアウト・直列化スタイル）を
-    /// 一度だけ渡して初期化する。Transport は差し替え可能で、テスト時にモックに置換できる。
+    /// Two behaviours are worth knowing before choosing arguments.
+    ///
+    /// **Headers are applied in order, and the last write wins:** `Accept` and
+    /// `Content-Type` first, then `defaultHeaders`, then the resolved auth header, then
+    /// the group's `commonHeaders`, then the endpoint's `additionalHeaders`. So a
+    /// `defaultHeaders` entry can replace `Accept`, and a group or endpoint header named
+    /// `Authorization` silently replaces the token this client just resolved.
+    ///
+    /// **`retryPolicy` and `rateLimitMapping` govern buffered calls only.** SSE calls go
+    /// straight to `transport`, so a stream that drops is never retried and no rate-limit
+    /// header is read for it.
     ///
     /// - Parameters:
-    ///   - baseURL: すべてのリクエストの基底 URL。パスは `APIContract.subPath` で相対解決される
-    ///   - transport: HTTP 送受信・SSE ストリームを担う Transport（デフォルト: `URLSessionTransport`）
-    ///   - authTokenProvider: Bearer / ApiKey / QueryParam 認証トークンのプロバイダー。`nil` で認証なし
-    ///   - timeout: リクエストタイムアウト（秒）
-    ///   - defaultHeaders: すべてのリクエストに付与する固定ヘッダー
-    ///   - retryPolicy: 一時的な失敗に対するリトライ戦略（デフォルト: リトライなし）
-    ///   - rateLimitMapping: 429 レスポンスの `Retry-After` ヘッダーマッピング
-    ///   - keyStyle: JSON キーの変換スタイル（エンコード・デコード両方に適用）
-    ///   - dateStrategy: 日付のエンコード・デコード形式
+    ///   - baseURL: Prefixes every request; the contract's resolved path is appended. A contract whose path is empty leaves it untouched, which is how a base URL that is already a complete endpoint works.
+    ///   - transport: Where bytes actually go. Substituting a mock here exercises the whole request-building path, which a stub `APIClient` does not.
+    ///   - authTokenProvider: Consulted once per call. `nil` sends every request unauthenticated no matter what the contract's `AuthScheme` says.
+    ///   - timeout: Per-request timeout in seconds, passed down to the transport.
+    ///   - defaultHeaders: Added to every request, and overridable per group and per endpoint.
+    ///   - retryPolicy: Governs buffered sends. The default retries nothing, so opt in deliberately.
+    ///   - rateLimitMapping: How to read rate-limit headers, so the retry policy can honour the server's `Retry-After` instead of backing off blindly. `nil` ignores them.
+    ///   - keyStyle: Applied to request encoding and response decoding alike.
+    ///   - dateStrategy: Wire format for `Date` in both directions.
     public init(
         baseURL: URL,
         transport: any HTTPTransport & HTTPStreamingTransport = URLSessionTransport(),
@@ -68,15 +84,18 @@ public struct APIClientImpl: APIClient {
 
     // MARK: - APIExecutable
 
-    /// `APIContract` 準拠型を実行し、JSON デコード済みレスポンスを返す。
+    /// Runs a contract and returns the decoded output together with the status and headers.
     ///
-    /// リクエスト構築・認証ヘッダー付与・リトライ・エラーマッピングを自動で行う。
-    /// デコード失敗時は `logs` ストリームに `.decodingError` を流したうえで
-    /// `APIError.decodingError` を throw する。
+    /// The full buffered path: build the URL, resolve and attach the token, send through
+    /// the retrying transport, emit telemetry, map the failure, decode the body.
     ///
-    /// - Parameter contract: 実行するエンドポイント契約
-    /// - Returns: デコード済み出力とメタデータ（ステータスコード・レスポンスヘッダー）
-    /// - Throws: ``APIError``
+    /// Use this rather than `execute(_:)` when you need the status code or a response
+    /// header — a `Location`, an ETag, a pagination cursor. `execute(_:)` is this call
+    /// with the metadata discarded.
+    ///
+    /// - Parameter contract: The endpoint to run.
+    /// - Returns: The decoded `Output`, the status code, and the response headers.
+    /// - Throws: The group's mapped error if its `decodeError` claims the response, otherwise ``APIError``. A decode failure also emits ``HTTPLog/decodingError(endpoint:error:data:targetType:)`` first, which is the only copy of the offending body.
     public func executeWithResponse<E: APIContract>(_ contract: E) async throws -> APIResponse<E.Output>
         where E.Input == E, E: APIInput
     {
@@ -106,8 +125,18 @@ public struct APIClientImpl: APIClient {
         }
     }
 
-    /// レスポンスボディを JSON デコードせず生の `Data` で返す。音声/画像などバイナリ応答や、
-    /// 型付きデコードに乗らない応答に使う。非 2xx は group の `decodeError` でマップする。
+    /// Runs a contract and hands back the response body undecoded.
+    ///
+    /// For endpoints whose body is not JSON — audio, images, a PDF — or whose JSON does
+    /// not fit the contract's `Output`. Sends `Accept: */*` instead of
+    /// `application/json`, and the contract's `Output` type is ignored entirely.
+    ///
+    /// Failure handling is identical to ``executeWithResponse(_:)``: same group error
+    /// mapping, same events, same log entries. Only the success path differs.
+    ///
+    /// - Parameter contract: The endpoint to run.
+    /// - Returns: The raw body, the status code, and the response headers.
+    /// - Throws: The group's mapped error, otherwise ``APIError``.
     public func executeRaw<E: APIContract>(_ contract: E) async throws -> APIResponse<Data>
         where E.Input == E, E: APIInput
     {
@@ -129,13 +158,25 @@ public struct APIClientImpl: APIClient {
 
     // MARK: - StreamingAPIExecutable
 
-    /// `StreamingAPIContract` 準拠型を実行し、型付きイベントの `AsyncThrowingStream` を返す。
+    /// Opens an SSE stream and decodes each message into the contract's `Event` type.
     ///
-    /// SSE レスポンスの各メッセージを `E.Event` にデコードして逐次配信する。
-    /// `[DONE]` などの終端マーカーや空ペイロードは自動スキップする。
+    /// Empty payloads and the `[DONE]` sentinel are skipped rather than surfaced, so the
+    /// stream ends cleanly on a well-behaved server. Nothing is sent until you start
+    /// iterating, and abandoning the iteration — `break`, an early `return`, cancelling
+    /// the enclosing task — cancels the underlying request.
     ///
-    /// - Parameter contract: 実行するストリーミングエンドポイント契約
-    /// - Returns: 型付きイベントを逐次生成する `AsyncThrowingStream`
+    /// This path is deliberately thinner than the buffered one, in ways that matter:
+    ///
+    /// - **No retries.** `retryPolicy` and `rateLimitMapping` are not in play here.
+    /// - **No telemetry.** Nothing reaches `events` or `logs`, including a stream that
+    ///   fails outright, so a 401 on a stream will not drive your app-wide logout.
+    /// - **Errors are not normalized.** A message that fails to decode throws the raw
+    ///   `DecodingError`, not ``APIError/decodingError(_:)``, and a non-2xx status
+    ///   arrives as the transport's `HTTPStatusError`. Use ``executeEventStream(_:)``
+    ///   if you want the group's error mapping applied.
+    ///
+    /// - Parameter contract: The streaming endpoint to run.
+    /// - Returns: A stream of decoded events; it finishes when the response body ends.
     public func execute<E: StreamingAPIContract>(_ contract: E) -> AsyncThrowingStream<E.Event, Error>
         where E.Input == E, E: APIInput
     {
@@ -168,9 +209,20 @@ public struct APIClientImpl: APIClient {
         }
     }
 
-    /// 生の ``SSEEvent``(イベント名 + データ)をそのまま流す。Anthropic のように
-    /// 複数イベント型 + 状態蓄積を伴うストリームは、型付き ``execute`` ではなくこちらを使い、
-    /// プロバイダ側の accumulator で解釈する。非 2xx は group の `decodeError` でマップする。
+    /// Opens an SSE stream and yields each message undecoded, event name included.
+    ///
+    /// The form to use when one stream carries several event types and the meaning of a
+    /// message depends on what came before it — Anthropic's message stream, where
+    /// `content_block_delta` only makes sense against the block a `content_block_start`
+    /// opened. Reading `event` yourself and folding the deltas into state is the point;
+    /// ``execute(_:)`` cannot express it, because it decodes every message into one type.
+    ///
+    /// Like ``execute(_:)`` it retries nothing and emits no telemetry. Unlike it, a
+    /// non-2xx status is run through the group's `decodeError` and falls back to
+    /// ``APIError``, so the failure you catch has the same shape as a buffered call's.
+    ///
+    /// - Parameter contract: The endpoint to run. Any contract will do; it does not have to be a `StreamingAPIContract`.
+    /// - Returns: A stream of raw server-sent events.
     public func executeEventStream<E: APIContract>(_ contract: E) -> AsyncThrowingStream<SSEEvent, Error>
         where E.Input == E, E: APIInput
     {
@@ -219,9 +271,10 @@ public struct APIClientImpl: APIClient {
         endpointHeaders: [String: String],
         accept: String
     ) async throws -> HTTPRequest {
-        // path が空の場合 appendingPathComponent("") は末尾スラッシュを付与し、
-        // 完全 URL を baseURL に持つ契約(OpenAI 互換など)で `.../chat/completions/` の
-        // ような不正 URL を生む。空パスは baseURL をそのまま使う。
+        // appendingPathComponent("") appends a trailing slash. When the base URL is
+        // already a complete endpoint (OpenAI-compatible hosts, where the contract's path
+        // is empty by design) that produced `.../chat/completions/`, which Groq rejects
+        // with "Unknown request URL". An empty path must leave the base URL alone.
         let requestURL = path.isEmpty ? baseURL : baseURL.appendingPathComponent(path)
         guard var components = URLComponents(
             url: requestURL, resolvingAgainstBaseURL: true
@@ -256,7 +309,8 @@ public struct APIClientImpl: APIClient {
         return HTTPRequest(method: method, url: url, headers: headers, body: body, timeout: timeout)
     }
 
-    /// 認証トークンを取得する。プロバイダがスコープ対応なら必要スコープを渡す。
+    // Runs once per call, before the retry loop, which is why a retry reuses the same
+    // token and a 401 cannot trigger a refresh from here.
     private func resolveToken(scopes: [String]) async throws -> String? {
         if let scoped = authTokenProvider as? ScopedAuthTokenProvider {
             return try await scoped.fetchToken(scopes: scopes)
@@ -272,6 +326,9 @@ public struct APIClientImpl: APIClient {
         let response: HTTPResponse
         do {
             response = try await sendTransport.send(request)
+        // A status error is a response, not a transport failure. Folding it back into
+        // one keeps every non-2xx on a single path, so `.httpError` logs and events fire
+        // whichever way the transport chose to report the status.
         } catch let error as HTTPStatusError {
             response = HTTPResponse(status: error.status, headers: error.headers, body: error.body)
         } catch {

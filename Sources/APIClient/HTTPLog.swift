@@ -1,20 +1,36 @@
 import Foundation
 
-/// HTTP リクエスト/レスポンスのログエントリ。
+/// One finished request, in the shape a console line or an analytics event needs.
 ///
-/// `APIClientImpl.logs` から `AsyncStream` で受信する。
-/// 成功・HTTP エラー・デコードエラーの 3 種を区別し、
-/// `CustomStringConvertible` による整形済み文字列出力をサポートする。
+/// Read these from `APIClientImpl.logs`. Every buffered call produces exactly one entry
+/// whether it succeeded or not; SSE calls produce none.
+///
+/// Switch over the cases to send structured metrics, or `print(log)` to get the
+/// ``description`` block while debugging.
 public enum HTTPLog: Sendable {
-    /// 2xx 成功レスポンス。
+    /// A 2xx response, with the body as received and before any decoding.
     case success(endpoint: APIEndpoint, statusCode: Int, data: Data)
-    /// 非 2xx HTTP エラーレスポンス（4xx / 5xx）。
+    /// A non-2xx response, emitted whether or not the group's `decodeError` claimed it.
+    ///
+    /// So this is the reliable place to count failures: the thrown error may be your own
+    /// type, and this entry is still here.
     case httpError(endpoint: APIEndpoint, statusCode: Int, data: Data)
-    /// レスポンス JSON のデコード失敗。`targetType` は期待していた Swift 型名。
+    /// A 2xx body that would not decode, emitted immediately before ``APIError/decodingError(_:)`` is thrown.
+    ///
+    /// `error` is the `DecodingError`'s description, already flattened to a string so it
+    /// can cross into a logging pipeline; `targetType` names the type that was expected;
+    /// `data` is the body that failed. Nothing else keeps those bytes — if you drop this
+    /// entry, the payload that caused the failure is gone.
     case decodingError(endpoint: APIEndpoint, error: String, data: Data, targetType: String)
 }
 
 extension HTTPLog: CustomStringConvertible {
+    /// A multi-line block for a human reading a console, not a format to parse.
+    ///
+    /// JSON bodies are pretty-printed, other bodies appear as text, and bodies that are
+    /// not UTF-8 appear as a byte count. Success bodies over 10 KB are replaced by their
+    /// size; error and decode-failure bodies are not, so a large error payload is
+    /// rendered in full.
     public var description: String {
         switch self {
         case .success(let endpoint, let statusCode, let data):

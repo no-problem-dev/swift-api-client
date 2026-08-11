@@ -144,7 +144,8 @@ private struct StreamContract: StreamingAPIContract, APIInput {
     static func decode(pathParameters: [String: String], queryParameters: [String: String], body: Data?, decoder: any APIBodyDecoder) throws -> Self { Self() }
 }
 
-/// 完全 URL を baseURL に持つ契約(OpenAI 互換)の再現: basePath も subPath も空。
+/// Reproduces an OpenAI-compatible contract whose base URL is already the complete
+/// endpoint: both basePath and subPath are empty.
 private enum EmptyPathAPIGroup: APIContractGroup {
     static let basePath = ""
     static let auth: AuthScheme = .bearer
@@ -206,8 +207,8 @@ final class APIClientImplTests: XCTestCase {
         XCTAssertEqual(mock.recordedRequests.first?.url.query, "page=3")
     }
 
-    /// 回帰ゲート: path が空の契約(完全 URL を baseURL に持つ OpenAI 互換)で
-    /// 末尾スラッシュを付与しないこと。Groq の `Unknown request URL` 障害の再発防止。
+    /// Regression gate: an empty contract path must not gain a trailing slash.
+    /// Groq answered `.../chat/completions/` with `Unknown request URL`.
     func testEmptyPathDoesNotAddTrailingSlash() async throws {
         let mock = MockTransport { _ in okResponse(#"{"id":1,"name":"x"}"#) }
         let fullURL = URL(string: "https://api.groq.com/openai/v1/chat/completions")!
@@ -314,7 +315,7 @@ final class APIClientImplTests: XCTestCase {
 
 // MARK: - Scope propagation (ScopedAuthTokenProvider)
 
-/// `fetchToken(scopes:)` に渡されたスコープを記録するスレッドセーフな箱。
+/// Thread-safe box recording the scopes handed to `fetchToken(scopes:)`.
 private final class ScopeRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var _scopes: [String]?
@@ -338,7 +339,7 @@ private enum ScopedGroup: APIContractGroup {
     static let requiredScopes: [String] = ["group.default"]
 }
 
-/// エンドポイント固有スコープを持つ契約。
+/// A contract that declares its own scopes.
 private struct ScopedEndpointContract: APIContract, APIInput {
     typealias Group = ScopedGroup
     typealias Input = Self
@@ -350,7 +351,7 @@ private struct ScopedEndpointContract: APIContract, APIInput {
     static func decode(pathParameters: [String: String], queryParameters: [String: String], body: Data?, decoder: any APIBodyDecoder) throws -> Self { Self() }
 }
 
-/// 固有スコープを宣言せずグループ既定を継承する契約。
+/// A contract that declares none and inherits the group's.
 private struct GroupScopedContract: APIContract, APIInput {
     typealias Group = ScopedGroup
     typealias Input = Self

@@ -2,52 +2,63 @@ English | [日本語](./README.ja.md)
 
 # swift-api-client
 
-A lightweight Swift HTTP API client with async/await support.
+An HTTP client for Swift apps that run typed endpoint contracts, buffered or streaming, over one configuration.
 
 ![Swift](https://img.shields.io/badge/Swift-6.0-orange.svg)
 ![Platforms](https://img.shields.io/badge/Platforms-iOS%2017.0+%20%7C%20macOS%2014.0+-blue.svg)
 ![SPM](https://img.shields.io/badge/Swift_Package_Manager-compatible-brightgreen.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-📚 **[Full Documentation](https://no-problem-dev.github.io/swift-api-client/documentation/apiclient/)**
-
 ## Overview
 
-`swift-api-client` is a package for making HTTP API calls in Swift applications simply and type-safely. It supports iOS and macOS platforms with modern Swift concurrency.
+Endpoints are declared as types conforming to `APIContract` from
+[swift-api-contract](https://github.com/no-problem-dev/swift-api-contract), which carries
+the method, path, body, and output type. A call site cannot then ask for a response shape
+the endpoint does not produce.
 
-Built on the `APIContract` protocol from [swift-api-contract](https://github.com/no-problem-dev/swift-api-contract), it guarantees request/response consistency with compile-time type checking.
+The client itself performs no I/O. Sending is an injectable transport, so a test can
+exercise real URL assembly and header precedence against a mock; retry and rate limiting
+are a decorator around it; JSON coding is fixed, and configured through `keyStyle` and
+`dateStrategy` rather than by passing a coder.
 
-### Key Features
+- Buffered and SSE calls share one transport, codec, and credential, so they cannot drift apart
+- Authentication resolved per request through a token provider you implement
+- 401, 403, 429, 503 and other 5xx also delivered as an app-wide `AsyncStream`, so logout and maintenance screens are written once
+- Per-group error decoding, so an API's own error body becomes your own Swift error type
+- Retry with backoff that honours `Retry-After`
 
-- **Modern async/await API** — Full use of Swift 6.0 concurrency
-- **Type-safe requests/responses** — Compile-time type checking via `APIContract`
-- **Automatic JSON decoding** — Simple response handling with `Codable`
-- **Flexible error handling** — Custom error decoding definable per API group
-- **Authentication support** — Bearer / ApiKey / QueryParam auth via token provider
-- **HTTP event stream** — Critical events (auth errors, rate limiting, etc.) delivered via `AsyncStream`
-- **HTTP log stream** — Monitor all requests/responses via `AsyncStream`
-- **SSE streaming** — Typed and raw Server-Sent Events streams
-- **Cross-platform** — iOS and macOS support
+## Quick Start
 
-## Dependencies
+```swift
+import APIClient
 
-| Package | Purpose |
-|---|---|
-| [swift-api-contract](https://github.com/no-problem-dev/swift-api-contract) | API contract type definitions (`APIContract` / `APIContractGroup`, etc.) |
-| [swift-http-transport](https://github.com/no-problem-dev/swift-http-transport) | HTTP send/receive / retry / SSE |
-| [swift-structured-data](https://github.com/no-problem-dev/swift-structured-data) | JSON encoding and decoding |
+let client = APIClientImpl(
+    baseURL: URL(string: "https://api.example.com")!,
+    keyStyle: .snakeCase
+)
+
+let product = try await client.execute(GetProduct(id: "sku-42"))
+
+for try await chunk in client.execute(StreamCompletion(prompt: prompt)) {
+    transcript.append(chunk.delta)
+}
+```
+
+`GetProduct` and `StreamCompletion` are contracts. Declaring one, mapping an API's errors
+onto Swift errors, and observing the event stream are all in the documentation.
+
+## Documentation
+
+**[API reference and guide](https://no-problem-dev.github.io/swift-api-client/documentation/apiclient/)** —
+the full walkthrough from declaring a contract to handling 401 once for the whole app.
 
 ## Requirements
 
-- iOS 17.0+
-- macOS 14.0+
-- Swift 6.0+
+iOS 17.0+ · macOS 14.0+ · Swift 6.0+
 
 ## Installation
 
-### Swift Package Manager
-
-Add the following to your `Package.swift`:
+Add the package to your `Package.swift`:
 
 ```swift
 dependencies: [
@@ -55,203 +66,13 @@ dependencies: [
 ]
 ```
 
-Or in Xcode:
-1. File > Add Package Dependencies
-2. Enter the package URL: `https://github.com/no-problem-dev/swift-api-client.git`
-3. Select version: `2.3.1` or later
+Or in Xcode: **File > Add Package Dependencies**, then enter
+`https://github.com/no-problem-dev/swift-api-client.git`.
 
-## Quick Start
+## Contributing
 
-This package defines requests with types that conform to the `APIContract` protocol.
-
-```swift
-import APIClient
-import APIContract
-
-// 1. Define your response type
-struct User: Codable, Sendable {
-    let id: Int
-    let name: String
-}
-
-// 2. Define an API group (shared settings)
-enum UserAPI: APIContractGroup {
-    static let basePath = "/v1"
-    static let auth: AuthScheme = .bearer
-    static let endpoints: [EndpointDescriptor] = []
-    static func decodeError(
-        statusCode: Int, data: Data,
-        headers: [String: String], decoder: any APIBodyDecoder
-    ) -> (any Error)? { nil }
-}
-
-// 3. Define the endpoint contract
-struct GetUser: APIContract, APIInput {
-    typealias Group = UserAPI
-    typealias Input = Self
-    typealias Output = User
-    static let method: APIMethod = .get
-    static let subPath = "/users/1"
-    func encodeBody(using encoder: any APIBodyEncoder) throws -> Data? { nil }
-    static func decode(
-        pathParameters: [String: String],
-        queryParameters: [String: String],
-        body: Data?, decoder: any APIBodyDecoder
-    ) throws -> Self { Self() }
-}
-
-// 4. Create a client and execute the request
-let client = APIClientImpl(baseURL: URL(string: "https://api.example.com")!)
-let response = try await client.executeWithResponse(GetUser())
-print(response.output.name)  // User.name
-```
-
-## Usage
-
-### POST Request (with JSON body)
-
-```swift
-struct CreateUserBody: Codable, Sendable {
-    let name: String
-    let email: String
-}
-
-struct CreateUser: APIContract, APIInput {
-    typealias Group = UserAPI
-    typealias Input = Self
-    typealias Output = User
-    static let method: APIMethod = .post
-    static let subPath = "/users"
-    let body: CreateUserBody
-    func encodeBody(using encoder: any APIBodyEncoder) throws -> Data? {
-        try encoder.encode(body)
-    }
-    static func decode(
-        pathParameters: [String: String], queryParameters: [String: String],
-        body: Data?, decoder: any APIBodyDecoder
-    ) throws -> Self { fatalError("server-only") }
-}
-
-let response = try await client.executeWithResponse(
-    CreateUser(body: CreateUserBody(name: "Ada", email: "ada@example.com"))
-)
-let newUser = response.output
-```
-
-### Error Handling
-
-```swift
-do {
-    let response = try await client.executeWithResponse(GetUser())
-    print(response.output.name)
-} catch APIError.unauthorized {
-    print("Authentication error")
-} catch APIError.networkError(let error) {
-    print("Network error: \(error.localizedDescription)")
-} catch APIError.httpError(let statusCode, _) {
-    print("HTTP error: \(statusCode)")
-} catch APIError.decodingError(let error) {
-    print("Decoding error: \(error.localizedDescription)")
-} catch {
-    print("Unexpected error: \(error)")
-}
-```
-
-### Using an Authentication Token
-
-```swift
-// Implement a token provider
-struct MyTokenProvider: AuthTokenProvider {
-    func fetchToken() async throws -> String? {
-        // Token retrieval logic (e.g., from Keychain)
-        return "your-auth-token"
-    }
-}
-
-// Pass the token provider when creating the client
-let client = APIClientImpl(
-    baseURL: URL(string: "https://api.example.com")!,
-    authTokenProvider: MyTokenProvider()
-)
-// Authorization: Bearer header is added automatically on each request
-```
-
-### Binary Response (audio, images)
-
-```swift
-// executeRaw returns raw Data without JSON decoding
-let response = try await client.executeRaw(GetAudioContract())
-let audioData = response.output  // Data
-```
-
-### SSE Streaming
-
-Typed stream (single event type):
-
-```swift
-for try await event in client.execute(StreamContract()) {
-    print(event.delta)
-}
-```
-
-Raw stream (multiple event types, e.g., Anthropic):
-
-```swift
-for try await sse in client.executeEventStream(GetStreamContract()) {
-    print(sse.event ?? "message", sse.data)
-}
-```
-
-### Monitoring HTTP Events
-
-Monitor critical HTTP responses (401, 403, 429, 503, 5xx) application-wide:
-
-```swift
-Task {
-    for await event in client.events {
-        switch event {
-        case .unauthorized:
-            await authManager.handleLogout()
-        case .rateLimited(_, let retryAfter, _):
-            print("Rate limited: retry after \(retryAfter ?? 0)s")
-        case .serviceUnavailable:
-            await router.showMaintenanceScreen()
-        default:
-            break
-        }
-    }
-}
-```
-
-### Monitoring HTTP Logs
-
-```swift
-// Debug console output (formatted via CustomStringConvertible)
-Task {
-    for await log in client.logs {
-        print(log)
-    }
-}
-
-// Custom handling (e.g., sending to Analytics)
-Task {
-    for await log in client.logs {
-        switch log {
-        case .success(let endpoint, let statusCode, _):
-            analytics.trackSuccess(endpoint: endpoint.path, statusCode: statusCode)
-        case .httpError(let endpoint, let statusCode, _):
-            analytics.trackError(endpoint: endpoint.path, statusCode: statusCode)
-        case .decodingError(let endpoint, _, _, let targetType):
-            analytics.trackDecodingError(endpoint: endpoint.path, type: targetType)
-        }
-    }
-}
-```
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-This project is released under the MIT License. See [LICENSE](LICENSE) for details.
-
-## Support
-
-For bug reports or feature requests, please [open an issue on GitHub](https://github.com/no-problem-dev/swift-api-client/issues).
+MIT. See [LICENSE](LICENSE).

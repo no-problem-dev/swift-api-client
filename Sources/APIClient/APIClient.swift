@@ -3,46 +3,67 @@ import HTTPTransport
 import Foundation
 import StructuredDataCore
 
-/// HTTPベースのAPIクライアントプロトコル。
+/// The seam an app depends on to run contracts: one transport, one codec, both request shapes.
 ///
-/// 非ストリーミング(`executeWithResponse`/`execute`)とストリーミング(`execute` →
-/// `AsyncThrowingStream`)を同一の Transport・Codec で対称に提供する。
+/// Buffered calls (`APIExecutable`) and SSE calls (`StreamingAPIExecutable`) are served
+/// from the same configuration, so the streaming form of an endpoint cannot drift away
+/// from the buffered form in key style, date format, or authentication.
+///
+/// Depend on this protocol where you want to hand a test a canned client. Depend on
+/// ``APIClientImpl`` and substitute its transport instead where you want the real
+/// request-building path — URL assembly, header precedence, error mapping — under test.
 public protocol APIClient: APIExecutable, StreamingAPIExecutable {
-    /// `Encodable` 値を内部 Codec で JSON エンコードする。
+    /// Encodes a value with the same key and date strategies the client applies to request bodies.
     ///
-    /// カスタムリクエストボディを手動構築する場合など、クライアントの
-    /// 直列化設定（`keyStyle` / `dateStrategy`）を一貫して使いたい際に利用する。
+    /// For contracts that have to assemble a body by hand — a multipart part, a JSON
+    /// string embedded in another field — and must not disagree with the `keyStyle`
+    /// and `dateStrategy` the rest of the client uses.
     ///
-    /// - Parameter value: エンコード対象の値
-    /// - Returns: JSON エンコード済みの `Data`
-    /// - Throws: エンコード失敗時に `EncodingError`
+    /// - Parameter value: The value to encode.
+    /// - Returns: The JSON encoding of `value`.
+    /// - Throws: Whatever the body encoder throws, typically `EncodingError`.
     func encode<T: Encodable>(_ value: T) throws -> Data
 
-    /// 横断的 HTTP イベント（401 / 403 / 429 / 503 / 5xx）を流す `AsyncStream`。
+    /// Responses that deserve one app-wide reaction rather than a `catch` at every call site: 401, 403, 429, 503, other 5xx.
     ///
-    /// ログアウト遷移・メンテナンス画面・レート制限 UI などをイベント駆動で実装するために使う。
+    /// Drive logout, a maintenance screen, or a rate-limit banner from here. Events do
+    /// not replace the thrown error — the call still fails — they save every call site
+    /// from repeating the same response to it.
+    ///
+    /// Two limits are worth designing around. `AsyncStream` serves a single consumer, so
+    /// exactly one long-lived task should iterate this; a second iterator divides the
+    /// events with the first instead of receiving copies. And the buffer is unbounded, so
+    /// a client nobody iterates retains every event it has ever emitted.
+    ///
+    /// Only buffered calls emit events. Failures from ``APIClientImpl/execute(_:)`` and
+    /// ``APIClientImpl/executeEventStream(_:)`` never reach this stream.
     var events: AsyncStream<HTTPEvent> { get }
 
-    /// 全リクエスト/レスポンスのログエントリを流す `AsyncStream`。
+    /// Every completed request, successful or not, in a shape a console or an analytics sink can take.
     ///
-    /// デバッグ出力や Analytics 送信など、リクエスト横断の監視基盤として使う。
+    /// Same single-consumer, unbounded-buffer contract as ``events``, and the same
+    /// blind spot: SSE calls produce no entries.
     var logs: AsyncStream<HTTPLog> { get }
 }
 
-/// 日付ワイヤ形式の指定（内部 Codec の中立 enum を再公開）。
+/// The wire format for `Date` in request and response bodies.
+///
+/// Named here so that configuring a client does not require importing the
+/// serialization package: `dateStrategy: .llmAPIDefault` resolves through this alias.
 public typealias DateStrategy = DateCodingStrategy
 
-/// JSON オブジェクトキーの変換スタイル。
+/// How Swift property names are translated to JSON object keys.
 ///
-/// `APIClientImpl` の `keyStyle:` 引数で指定する。エンコード（リクエストボディ）と
-/// デコード（レスポンスボディ）の両方に対称に適用される。
-///
-/// - `default`: Swift のプロパティ名をそのまま使う（`camelCase`）
-/// - `snakeCase`: `camelCase` → `snake_case` に変換（多くの REST API のデフォルト）
-/// - `kebabCase`: `camelCase` → `kebab-case` に変換
+/// Whichever style you pass to ``APIClientImpl/init(baseURL:transport:authTokenProvider:timeout:defaultHeaders:retryPolicy:rateLimitMapping:keyStyle:dateStrategy:)``
+/// governs encoding and decoding alike, so a value written to the API and read back
+/// cannot silently disagree with itself. Setting it once replaces writing `CodingKeys`
+/// on every payload type.
 public enum APIKeyStyle: Sendable {
+    /// Send the Swift property names unchanged.
     case `default`
+    /// `camelCase` in Swift, `snake_case` on the wire — the usual REST convention.
     case snakeCase
+    /// `camelCase` in Swift, `kebab-case` on the wire.
     case kebabCase
 
     var encoding: EncodingOptions.KeyStrategy {

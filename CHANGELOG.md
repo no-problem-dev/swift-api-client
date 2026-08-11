@@ -1,187 +1,281 @@
 # Changelog
 
-このプロジェクトのすべての重要な変更は、このファイルに記録されます。
+All notable changes to this project are recorded here.
 
-このフォーマットは [Keep a Changelog](https://keepachangelog.com/ja/1.0.0/) に基づいており、
-このプロジェクトは [Semantic Versioning](https://semver.org/lang/ja/) に準拠しています。
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and this
+project adheres to [Semantic Versioning](https://semver.org/). Each section below is
+published verbatim as the body of the matching GitHub Release.
 
-## [未リリース]
+## [Unreleased]
+
+### Changed
+
+- **`APIContract` and `HTTPTransport` are no longer re-exported.** Code that used their
+  types through `import APIClient` alone now imports them explicitly. Re-exporting made
+  their public surface part of this package's, which forced a major here every time a
+  dependency published one, and that major then propagated to every consumer.
+- Documentation is English throughout: doc comments, README, this file, and the DocC
+  landing page. The landing page carries the full walkthrough and the README links to it
+  rather than repeating it.
+- CI no longer builds or tests; verification happens locally before a tag is pushed, and
+  the workflow only turns a tag into a GitHub Release.
+
+### Added
+
+- `CONTRIBUTING.md`, covering how to verify a change and how a release is cut.
+- `.spi.yml`, so Swift Package Index hosts the documentation.
+
+## [3.0.2] - 2026-07-30
+
+### Changed
+
+- Raise the swift-http-transport floor to 1.1.2, picking up the SSE parser's CRLF fix.
+
+## [3.0.1] - 2026-07-30
+
+### Changed
+
+- Widen the accepted swift-structured-data range to `1.3.0..<3.0.0` so consumers already
+  on 2.x can resolve.
+- Sync the release workflows with the shared templates; the old auto-release-on-merge
+  workflow is gone.
+
+## [3.0.0] - 2026-07-19
+
+### Removed
+
+- `APIEndpoint.headers`, `APIEndpoint.body`, and `APIEndpoint.queryItems`. Nothing read
+  them — the request is built from the contract — so they described a request that was
+  never sent.
+
+### Changed
+
+- `AuthTokenProvider.getToken()` is now `fetchToken()`.
+
+### Added
+
+- A DocC landing page with an overview and curated topics, and an English/Japanese
+  README pair.
+- DocC builds on macOS 26 / Xcode 26 (Swift 6.2); `/documentation/apiclient` is the
+  canonical route.
+
+## [2.3.1] - 2026-06-14
+
+### Fixed
+
+- A contract with an empty path no longer gains a trailing slash. Base URLs that are
+  already complete endpoints (OpenAI-compatible hosts) were producing
+  `.../chat/completions/`, which Groq rejects with `Unknown request URL`.
+
+## [2.3.0] - 2026-06-13
+
+### Added
+
+- `ScopedAuthTokenProvider`, which receives the endpoint's `requiredScopes` so a provider
+  can check the grant before spending a request.
+
+## [2.2.0] - 2026-05-31
+
+### Added
+
+- `executeRaw`, returning the response body as `Data` without decoding it — for audio,
+  images, and anything that does not fit the contract's `Output`.
+
+## [2.1.0] - 2026-05-31
+
+### Added
+
+- `executeEventStream`, yielding raw `SSEEvent` values with event names intact, for
+  streams that carry several message types. Non-2xx statuses run through the group's
+  error mapping.
+
+## [2.0.0] - 2026-05-31
+
+### Changed
+
+- **The transport is injected.** `APIClientImpl` takes any
+  `HTTPTransport & HTTPStreamingTransport` in place of a `URLSession`, so tests can
+  exercise the real request-building path against a mock.
+- **Body coding moved to swift-structured-data and is now internal.** `keyStyle` and
+  `dateStrategy` replace the four `JSONEncoder`/`JSONDecoder` strategy parameters, and
+  apply symmetrically to encoding and decoding.
+
+### Removed
+
+- The in-package SSE client — `SSEClient`, `SSEClientImpl`, `SSEEvent`, and
+  `SSEClient+StreamingAPI` — and `RetryPolicy`. Both now come from swift-http-transport.
+
+## [1.2.1] - 2026-05-30
+
+### Fixed
+
+- `SSEClientImpl` framed data-only SSE messages incorrectly.
 
 ## [1.2.0] - 2026-04-18
 
-### 追加
+### Added
 
-- **`keyEncodingStrategy` パラメータ**: `APIClientImpl.init` に `JSONEncoder.KeyEncodingStrategy` を指定可能に
-  - デフォルト `.useDefaultKeys` で後方互換
-  - `.convertToSnakeCase` を指定することで、camelCase の Swift フィールドを snake_case JSON キーへ自動変換し、`keyDecodingStrategy: .convertFromSnakeCase` と対称な encode / decode を実現
-  - これにより Codable 側で `case foo = "foo_bar"` のような明示マッピングが不要になり、命名戦略を 1 箇所（クライアント生成時）で決定できる
+- A `keyEncodingStrategy` parameter on `APIClientImpl.init`, defaulting to
+  `.useDefaultKeys`. Passing `.convertToSnakeCase` makes encoding symmetric with
+  `keyDecodingStrategy: .convertFromSnakeCase`, so payload types no longer need explicit
+  `case foo = "foo_bar"` mappings and the naming convention is decided in one place.
+
+## [1.1.2] - 2026-04-07
+
+### Fixed
+
+- Linux build: import `FoundationNetworking`, and restrict the SSE client to Darwin.
+
+## [1.1.1] - 2026-04-07
+
+### Changed
+
+- Pin swift-api-contract to 1.1.1.
+
+## [1.1.0] - 2026-03-08
+
+### Added
+
+- Per-group custom error decoding, `AuthScheme` support, and a retry policy.
 
 ## [1.0.13] - 2026-01-11
 
-### 追加
+### Added
 
-- **SSEストリーミングクライアント**: Server-Sent Events (SSE) クライアント実装
-  - `SSEEvent`: SSEイベント構造体（data, event, id, retry フィールド）
-  - `SSEClient`: SSEストリーミング操作プロトコル
-  - `SSEClientImpl`: URLSessionベースのSSEクライアント実装（自動再接続対応）
-  - `SSEClient+StreamingAPI`: `StreamingAPIContract` との連携拡張
-
-### テスト
-
-- SSEイベントパーシングのテストを追加
-- SSEクライアント機能のテストを追加
+- A Server-Sent Events client: `SSEEvent` (data, event, id, retry), the `SSEClient`
+  protocol, `SSEClientImpl` on `URLSession` with automatic reconnection, and a
+  `StreamingAPIContract` bridge.
 
 ## [1.0.12] - 2026-01-03
 
-### 追加
-- ユニットテストを追加
+### Added
+
+- Unit tests.
 
 ## [1.0.11] - 2026-01-03
 
-### 変更
-- **APIExecutable 統合**
-  - `APIClient` プロトコルが `APIExecutable` を継承
-  - `request()` メソッド削除（`execute()` のみに統一）
-  - `HTTPMethod` → `APIMethod` に統一（api-contract 対応）
-- Swift 6.2 に更新
-- 不要なコメント・MARK を削除
+### Changed
 
-### 破壊的変更
-- `request()` メソッドは削除されました
-  - 代わりに `execute()` を使用してください
+- `APIClient` now inherits `APIExecutable`, and `request()` is gone — use `execute()`.
+- `HTTPMethod` is renamed `APIMethod`, matching swift-api-contract.
+- Updated to Swift 6.2.
 
 ## [1.0.10] - 2026-01-01
 
-### 変更
-- `HTTPMethod` → `APIMethod` にリネーム（api-contract v1.0.2 対応）
+### Changed
+
+- `HTTPMethod` renamed to `APIMethod` for swift-api-contract 1.0.2.
 
 ## [1.0.9] - 2025-12-31
 
-### 追加
-- **APIContract 統合**
-  - `swift-api-contract` 1.0.0 を依存に追加（`.upToNextMajor`）
-  - `APIClient` プロトコルが `APIExecutor` を継承
-  - `execute<E: APIContract>()` メソッドを `APIClientImpl` に実装
-  - `@_exported import` で利用側が `APIContract` を直接使用可能に
+### Added
 
-### 変更
-- `HTTPMethod` の重複定義を削除（`APIContract` のものを使用）
+- swift-api-contract 1.0.0 as a dependency, `APIClient` conforming to `APIExecutor`, and
+  `execute<E: APIContract>()` on `APIClientImpl`.
 
-### 破壊的変更
-- `HTTPMethod` は `APIContract` モジュールからインポートされる形に変更
-  - 既存コードは `import APIClient` のみで動作（`@_exported` により自動インポート）
+### Changed
+
+- Dropped the duplicate `HTTPMethod` definition in favour of the one in `APIContract`.
 
 ## [1.0.8] - 2025-12-05
 
-### 変更
-- **ストリーム設計の簡素化**: マルチキャストからユニキャストへ変更
-  - `MulticastStreamSource.swift` を削除
-  - `AsyncStream.makeStream()` を直接使用するシンプルな実装に
-  - Actor排除により `await` が不要に（パフォーマンス向上）
-  - `stream`/`continuation` の標準命名パターンを採用
+### Changed
 
-### 削除
-- `MulticastStreamSource<Element>` を削除
+- `events` and `logs` are unicast rather than multicast, built directly on
+  `AsyncStream.makeStream()`. Dropping the actor removed the `await`, so
+  `for await event in client.events` no longer reads `in await client.events`.
 
-### 破壊的変更
-- `events`/`logs` プロパティから `async` を削除
-  - 変更前: `for await event in await client.events`
-  - 変更後: `for await event in client.events`
-- 複数購読は非サポート（DIコンテナで単一購読を推奨）
+### Removed
+
+- `MulticastStreamSource<Element>`. Multiple subscribers are no longer supported;
+  subscribe once, from your DI container.
 
 ## [1.0.7] - 2025-12-03
 
-### 追加
-- **HTTPイベントストリーム機能**
-  - `HTTPEvent`: 重要なHTTPレスポンス（401, 403, 429, 503, 5xx）を表すイベント型
-  - `APIClient.events`: 複数購読可能なイベントストリームプロパティ
-  - 認証エラー、レート制限、サービス停止等をアプリ全体で一元的にハンドリング可能に
-- **HTTPログストリーム機能**
-  - `HTTPLog`: リクエスト/レスポンスのログエントリ型（CustomStringConvertible対応）
-  - `APIClient.logs`: 複数購読可能なログストリームプロパティ
-  - `print(log)`で整形済みログを簡単に出力可能
-- **MulticastStreamSource<Element>**
-  - 汎用的なマルチキャストAsyncStreamソース（Actor実装）
-  - 複数購読者への同時配信、自動クリーンアップをサポート
+### Added
 
-### 削除
-- `HTTPLogger`クラスを削除（`logs`ストリームに置き換え）
-- `enableDebugLog`パラメータを削除
+- An HTTP event stream: `HTTPEvent` for the responses that need an app-wide reaction
+  (401, 403, 429, 503, other 5xx), exposed as `APIClient.events`.
+- An HTTP log stream: `HTTPLog` for request and response entries, exposed as
+  `APIClient.logs`, formatted by `CustomStringConvertible` so `print(log)` is readable.
+- `MulticastStreamSource<Element>`, an actor delivering one stream to several subscribers.
+
+### Removed
+
+- The `HTTPLogger` class and the `enableDebugLog` parameter, both superseded by `logs`.
 
 ## [1.0.6] - 2025-11-15
 
-### 追加
-- `APIClientImpl`に`dateEncodingStrategy`パラメータを追加
-  - `JSONEncoder.DateEncodingStrategy`を指定可能に（デフォルト: `.iso8601`）
-  - バックエンドAPI（Go）のRFC3339形式に対応
-  - リクエストボディの日付フィールドを正しくエンコード可能に
-- `encode<T: Encodable>`メソッドを追加
-  - リクエストボディのJSON文字列生成に統一的な日付エンコーディング戦略を適用
-  - デバッグ時のログ出力で日付形式の一貫性を保証
+### Added
 
-### 変更
-- リクエストボディのエンコーディングロジックをリファクタリング
-  - 従来の`JSONEncoder()`直接使用から`encode`メソッド経由に統一
-  - すべてのPOST/PUT/PATCHリクエストで日付エンコーディング戦略を適用
+- A `dateEncodingStrategy` parameter on `APIClientImpl`, defaulting to `.iso8601`, so
+  request bodies match a Go backend's RFC 3339 dates.
+- `encode<T: Encodable>`, applying the client's date strategy to hand-built bodies and
+  debug output.
+
+### Changed
+
+- Request bodies are encoded through `encode` rather than a bare `JSONEncoder()`, so
+  every POST, PUT, and PATCH gets the configured date strategy.
 
 ## [1.0.5] - 2025-11-13
 
-### 追加
-- `APIClientImpl`に`keyDecodingStrategy`パラメータを追加
-  - `JSONDecoder.KeyDecodingStrategy`を指定可能に（デフォルト: `.useDefaultKeys`）
-  - スネークケースAPIレスポンス対応のため`.convertFromSnakeCase`を指定可能
-  - 後方互換性を保持しながら、柔軟なキー変換に対応
+### Added
+
+- A `keyDecodingStrategy` parameter on `APIClientImpl`, defaulting to `.useDefaultKeys`,
+  so snake_case responses can be decoded with `.convertFromSnakeCase`.
 
 ## [1.0.4] - 2025-11-09
 
-### 修正
-- 自動リリースワークフローのメッセージを完全に日本語に統一（PRディスクリプション、リリースノート、ログメッセージ）
+### Fixed
+
+- Release workflow messages.
 
 ## [1.0.3] - 2025-11-04
 
-### 追加
-- DocC ドキュメントの自動生成と GitHub Pages への公開機能を追加
-  - Swift DocC Plugin を依存関係に追加
-  - GitHub Actions ワークフローで自動的にドキュメントを生成・デプロイ
-  - README に完全なドキュメントへのリンクを追加 (https://no-problem-dev.github.io/swift-api-client/documentation/apiclient/)
+### Added
 
-### 変更
-- ドキュメントへのアクセシビリティを向上
+- DocC documentation, generated and published to GitHub Pages by GitHub Actions, and
+  linked from the README.
 
-## [1.0.1] - 2025-02-11
+## [1.0.2] - 2025-11-03
 
-### 改善
-- README に包括的な使用例とバッジを追加
-  - Swift 6.0、プラットフォーム、SPM、ライセンスのバッジを追加
-  - プレースホルダーコメントを実際の動作するコード例に置き換え
-  - 最速のオンボーディングのためのクイックスタートセクションを追加
-  - 基本的な GET リクエストの例を追加
-  - POST リクエスト（JSON ボディ付き）の例を追加
-  - クエリパラメータ付きリクエストの例を追加
-  - 包括的なエラーハンドリングの例を追加
-  - 認証トークンの使用例を追加
-  - HTTP ロギングの有効化例を追加
-  - LICENSE ファイルへの簡潔な参照を追加
+### Changed
 
-### 追加
-- MIT ライセンス情報を含む別の LICENSE ファイルを作成
+- Standardized the README structure.
 
-### 変更
-- README から完全なライセンステキストを削除し、LICENSE ファイルへの参照に置き換え
+## [1.0.1] - 2025-11-02
 
-## [1.0.0] - 2024-12-XX
+### Added
 
-### 追加
-- 初回リリース
-- モダンな async/await API
-- 型安全なリクエスト/レスポンス
-- 自動 JSON デコーディング
-- 柔軟なエラーハンドリング
-- 認証サポート
-- HTTP ロギング機能
-- iOS 17.0+ および macOS 14.0+ サポート
+- A separate `LICENSE` file carrying the MIT text.
 
-[未リリース]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.13...HEAD
+### Changed
+
+- README: working examples in place of placeholder comments — quick start, GET, POST with
+  a JSON body, query parameters, error handling, authentication, and logging — plus
+  badges. The full licence text moved out to `LICENSE`.
+
+## [1.0.0] - 2025-11-02
+
+Initial release: an async/await HTTP client with typed requests and responses, automatic
+JSON decoding, per-group error handling, authentication, logging, on iOS 17.0+ and
+macOS 14.0+.
+
+[Unreleased]: https://github.com/no-problem-dev/swift-api-client/compare/3.0.2...HEAD
+[3.0.2]: https://github.com/no-problem-dev/swift-api-client/compare/3.0.1...3.0.2
+[3.0.1]: https://github.com/no-problem-dev/swift-api-client/compare/3.0.0...3.0.1
+[3.0.0]: https://github.com/no-problem-dev/swift-api-client/compare/v2.3.1...3.0.0
+[2.3.1]: https://github.com/no-problem-dev/swift-api-client/compare/v2.3.0...v2.3.1
+[2.3.0]: https://github.com/no-problem-dev/swift-api-client/compare/v2.2.0...v2.3.0
+[2.2.0]: https://github.com/no-problem-dev/swift-api-client/compare/v2.1.0...v2.2.0
+[2.1.0]: https://github.com/no-problem-dev/swift-api-client/compare/v2.0.0...v2.1.0
+[2.0.0]: https://github.com/no-problem-dev/swift-api-client/compare/v1.2.1...v2.0.0
+[1.2.1]: https://github.com/no-problem-dev/swift-api-client/compare/v1.2.0...v1.2.1
+[1.2.0]: https://github.com/no-problem-dev/swift-api-client/compare/v1.1.2...v1.2.0
+[1.1.2]: https://github.com/no-problem-dev/swift-api-client/compare/v1.1.1...v1.1.2
+[1.1.1]: https://github.com/no-problem-dev/swift-api-client/compare/v1.1.0...v1.1.1
+[1.1.0]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.13...v1.1.0
 [1.0.13]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.12...v1.0.13
 [1.0.12]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.11...v1.0.12
 [1.0.11]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.10...v1.0.11
@@ -192,22 +286,7 @@
 [1.0.6]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.3...v1.0.4
-[1.0.3]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.1...v1.0.3
+[1.0.3]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.2...v1.0.3
+[1.0.2]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/no-problem-dev/swift-api-client/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/no-problem-dev/swift-api-client/releases/tag/v1.0.0
-
-<!-- Auto-generated on 2025-11-15T01:10:00Z by release workflow -->
-
-<!-- Auto-generated on 2025-11-15T01:09:07Z by release workflow -->
-
-<!-- Auto-generated on 2025-12-03T05:39:36Z by release workflow -->
-
-<!-- Auto-generated on 2025-12-04T23:24:03Z by release workflow -->
-
-<!-- Auto-generated on 2025-12-31T03:17:18Z by release workflow -->
-
-<!-- Auto-generated on 2026-01-01T05:56:21Z by release workflow -->
-
-<!-- Auto-generated on 2026-01-03T00:13:58Z by release workflow -->
-
-<!-- Auto-generated on 2026-01-03T01:21:12Z by release workflow -->
