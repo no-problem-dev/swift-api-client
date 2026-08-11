@@ -2,9 +2,9 @@ import Foundation
 
 /// Supplies the credential for a request, resolved when the request is built rather than when the client is created.
 ///
-/// ``APIClientImpl`` calls this once per call and attaches the result the way the
-/// contract's `AuthScheme` says: an `Authorization: Bearer` header, a named header, or
-/// a query item. Implement it over a keychain read or an OAuth library.
+/// ``APIClientImpl`` calls this when it has no token in hand and attaches the result the
+/// way the contract's `AuthScheme` says: an `Authorization: Bearer` header, a named
+/// header, or a query item. Implement it over a keychain read or an OAuth library.
 ///
 /// Three behaviours the signature does not show:
 ///
@@ -12,15 +12,15 @@ import Foundation
 ///   You learn about it from the server's 401.
 /// - Throwing fails the call before anything is sent, and your error propagates as
 ///   itself — it is not wrapped in ``APIError``.
-/// - **Retries do not come back here.** The token is baked into the request before the
-///   retry policy runs, so every attempt of one call carries the same token, and a 401
-///   never triggers a refresh on its own.
+/// - **You are not called once per request.** The resolved token is held and reused, so
+///   this method runs when there is nothing to reuse and again when a 401 throws away
+///   what there was. A burst of concurrent requests enters it once, not once per request,
+///   which is what keeps a provider that renews on expiry from firing one renewal per
+///   request — with rotating refresh tokens, those invalidate each other.
 ///
-/// Refresh therefore belongs inside this method: check expiry and renew before
-/// returning. Nothing upstream serializes these calls, so an app that fires several
-/// requests at once will enter this method several times concurrently — deduplicate the
-/// renewal yourself if your token endpoint cannot absorb that. React to a rejected
-/// token by observing `APIClient.events` for ``HTTPEvent/unauthorized(endpoint:data:)``.
+/// So a plain read is enough here; the client asks again when it needs to. Renewing on
+/// expiry inside this method still works and is not duplicated. React to a rejected token
+/// by observing `APIClient.events` for ``HTTPEvent/unauthorized(endpoint:data:)``.
 ///
 /// Use ``ScopedAuthTokenProvider`` instead when the endpoint's scopes should reach you.
 public protocol AuthTokenProvider: Sendable {

@@ -10,26 +10,25 @@ import StructuredDataCore
 /// deliberately not selectable — `keyStyle` and `dateStrategy` are the whole surface,
 /// rather than a coder you pass in.
 ///
-/// Two consequences of it being a `struct`. Copies share one `events` stream and one
-/// `logs` stream, because the copies hold the same stream continuations, so building a
-/// second client from the first does not give you a second telemetry channel. And
-/// nothing here is stateful across calls: a token is fetched per call, not cached.
-/// Construct one client per base URL and inject it.
+/// One consequence of it being a `struct`: copies share one telemetry channel and one
+/// credential, because they hold the same references. Building a second client from the
+/// first does not give you a second `events` stream, and does not double the calls your
+/// token provider sees. Construct one client per base URL and inject it.
 public struct APIClientImpl: APIClient {
     private let baseURL: URL
     private let transport: any HTTPTransport & HTTPStreamingTransport
     private let sendTransport: any HTTPTransport
-    private let authTokenProvider: AuthTokenProvider?
+    private let authToken: AuthToken
     private let timeout: TimeInterval
     private let defaultHeaders: [String: String]
     private let bodyEncoder: any APIBodyEncoder
     private let bodyDecoder: any APIBodyDecoder
 
-    public let events: AsyncStream<HTTPEvent>
-    private let eventContinuation: AsyncStream<HTTPEvent>.Continuation
+    public let events: TelemetryStream<HTTPEvent>
+    private let eventObservers: TelemetryObservers<HTTPEvent>
 
-    public let logs: AsyncStream<HTTPLog>
-    private let logContinuation: AsyncStream<HTTPLog>.Continuation
+    public let logs: TelemetryStream<HTTPLog>
+    private let logObservers: TelemetryObservers<HTTPLog>
 
     /// Creates a client for one base URL; contracts supply everything that varies per call.
     ///
@@ -38,8 +37,10 @@ public struct APIClientImpl: APIClient {
     /// **Headers are applied in order, and the last write wins:** `Accept` and
     /// `Content-Type` first, then `defaultHeaders`, then the resolved auth header, then
     /// the group's `commonHeaders`, then the endpoint's `additionalHeaders`. So a
-    /// `defaultHeaders` entry can replace `Accept`, and a group or endpoint header named
-    /// `Authorization` silently replaces the token this client just resolved.
+    /// `defaultHeaders` entry can replace `Accept`. The one exception is the credential:
+    /// a group or endpoint header naming the same header the contract's `AuthScheme` just
+    /// filled fails the call with ``APIError/conflictingAuthHeader(name:)`` rather than
+    /// quietly winning.
     ///
     /// **`retryPolicy` and `rateLimitMapping` govern buffered calls only.** SSE calls go
     /// straight to `transport`, so a stream that drops is never retried and no rate-limit
@@ -48,7 +49,7 @@ public struct APIClientImpl: APIClient {
     /// - Parameters:
     ///   - baseURL: Prefixes every request; the contract's resolved path is appended. A contract whose path is empty leaves it untouched, which is how a base URL that is already a complete endpoint works.
     ///   - transport: Where bytes actually go. Substituting a mock here exercises the whole request-building path, which a stub `APIClient` does not.
-    ///   - authTokenProvider: Consulted once per call. `nil` sends every request unauthenticated no matter what the contract's `AuthScheme` says.
+    ///   - authTokenProvider: Consulted when no token has been resolved yet and again whenever one is rejected with a 401; concurrent calls share a single consultation. `nil` sends every request unauthenticated no matter what the contract's `AuthScheme` says.
     ///   - timeout: Per-request timeout in seconds, passed down to the transport.
     ///   - defaultHeaders: Added to every request, and overridable per group and per endpoint.
     ///   - retryPolicy: Governs buffered sends. The default retries nothing, so opt in deliberately.
@@ -69,13 +70,19 @@ public struct APIClientImpl: APIClient {
         self.baseURL = baseURL
         self.transport = transport
         self.sendTransport = RetryingTransport(base: transport, policy: retryPolicy, rateLimitMapping: rateLimitMapping)
-        self.authTokenProvider = authTokenProvider
+        self.authToken = AuthToken(provider: authTokenProvider)
         self.timeout = timeout
         self.defaultHeaders = defaultHeaders
         self.bodyEncoder = BodyCoding.encoder(keyStrategy: keyStyle.encoding, dateStrategy: dateStrategy)
         self.bodyDecoder = BodyCoding.decoder(keyStrategy: keyStyle.decoding, dateStrategy: dateStrategy)
-        (self.events, self.eventContinuation) = AsyncStream.makeStream(of: HTTPEvent.self, bufferingPolicy: .unbounded)
-        (self.logs, self.logContinuation) = AsyncStream.makeStream(of: HTTPLog.self, bufferingPolicy: .unbounded)
+
+        let eventObservers = TelemetryObservers<HTTPEvent>()
+        self.eventObservers = eventObservers
+        self.events = TelemetryStream(eventObservers)
+
+        let logObservers = TelemetryObservers<HTTPLog>()
+        self.logObservers = logObservers
+        self.logs = TelemetryStream(logObservers)
     }
 
     public func encode<T: Encodable>(_ value: T) throws -> Data {
@@ -100,24 +107,26 @@ public struct APIClientImpl: APIClient {
         where E.Input == E, E: APIInput
     {
         let endpoint = APIEndpoint(path: E.resolvePath(with: contract), method: E.method)
-        let request = try await buildRequest(
-            method: E.method.rawValue,
-            path: E.resolvePath(with: contract),
-            queryParameters: contract.queryParameters,
-            body: try contract.encodeBody(using: bodyEncoder),
-            authScheme: E.auth,
-            scopes: E.requiredScopes,
-            groupHeaders: E.Group.commonHeaders,
-            endpointHeaders: contract.additionalHeaders,
-            accept: "application/json"
-        )
-
-        let response = try await send(request, endpoint: endpoint, decodeError: E.Group.decodeError)
+        let response = try await send(
+            endpoint: endpoint, scopes: E.requiredScopes, decodeError: E.Group.decodeError
+        ) {
+            try await buildRequest(
+                method: E.method.rawValue,
+                path: E.resolvePath(with: contract),
+                queryParameters: contract.queryParameters,
+                body: try contract.encodeBody(using: bodyEncoder),
+                authScheme: E.auth,
+                scopes: E.requiredScopes,
+                groupHeaders: E.Group.commonHeaders,
+                endpointHeaders: contract.additionalHeaders,
+                accept: "application/json"
+            )
+        }
         do {
             let output = try bodyDecoder.decode(E.Output.self, from: response.body)
             return APIResponse(output: output, statusCode: response.status, headers: dictionary(response.headers))
         } catch {
-            logContinuation.yield(.decodingError(
+            logObservers.yield(.decodingError(
                 endpoint: endpoint, error: String(describing: error),
                 data: response.body, targetType: String(describing: E.Output.self)
             ))
@@ -141,18 +150,21 @@ public struct APIClientImpl: APIClient {
         where E.Input == E, E: APIInput
     {
         let endpoint = APIEndpoint(path: E.resolvePath(with: contract), method: E.method)
-        let request = try await buildRequest(
-            method: E.method.rawValue,
-            path: E.resolvePath(with: contract),
-            queryParameters: contract.queryParameters,
-            body: try contract.encodeBody(using: bodyEncoder),
-            authScheme: E.auth,
-            scopes: E.requiredScopes,
-            groupHeaders: E.Group.commonHeaders,
-            endpointHeaders: contract.additionalHeaders,
-            accept: "*/*"
-        )
-        let response = try await send(request, endpoint: endpoint, decodeError: E.Group.decodeError)
+        let response = try await send(
+            endpoint: endpoint, scopes: E.requiredScopes, decodeError: E.Group.decodeError
+        ) {
+            try await buildRequest(
+                method: E.method.rawValue,
+                path: E.resolvePath(with: contract),
+                queryParameters: contract.queryParameters,
+                body: try contract.encodeBody(using: bodyEncoder),
+                authScheme: E.auth,
+                scopes: E.requiredScopes,
+                groupHeaders: E.Group.commonHeaders,
+                endpointHeaders: contract.additionalHeaders,
+                accept: "*/*"
+            )
+        }
         return APIResponse(output: response.body, statusCode: response.status, headers: dictionary(response.headers))
     }
 
@@ -170,20 +182,23 @@ public struct APIClientImpl: APIClient {
     /// - **No retries.** `retryPolicy` and `rateLimitMapping` are not in play here.
     /// - **No telemetry.** Nothing reaches `events` or `logs`, including a stream that
     ///   fails outright, so a 401 on a stream will not drive your app-wide logout.
-    /// - **Errors are not normalized.** A message that fails to decode throws the raw
-    ///   `DecodingError`, not ``APIError/decodingError(_:)``, and a non-2xx status
-    ///   arrives as the transport's `HTTPStatusError`. Use ``executeEventStream(_:)``
-    ///   if you want the group's error mapping applied.
+    /// - **No refresh.** The token is resolved once when the stream opens; a 401 here
+    ///   does not renew it the way a buffered call's does.
+    ///
+    /// Failures arrive in the same shape a buffered call's do: the group's `decodeError`
+    /// first, then ``APIError``. A `catch APIError.httpError` written for a buffered call
+    /// keeps matching when it is reused here.
     ///
     /// - Parameter contract: The streaming endpoint to run.
     /// - Returns: A stream of decoded events; it finishes when the response body ends.
+    /// - Throws: Into the stream: the group's mapped error, otherwise ``APIError``. A throwing ``AuthTokenProvider`` still fails with its own error, unwrapped.
     public func execute<E: StreamingAPIContract>(_ contract: E) -> AsyncThrowingStream<E.Event, Error>
         where E.Input == E, E: APIInput
     {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let request = try await buildRequest(
+                    let (request, _) = try await buildRequest(
                         method: E.method.rawValue,
                         path: E.resolvePath(with: contract),
                         queryParameters: contract.queryParameters,
@@ -202,7 +217,7 @@ public struct APIClientImpl: APIClient {
                     }
                     continuation.finish()
                 } catch {
-                    continuation.finish(throwing: error)
+                    continuation.finish(throwing: mapStreamFailure(error, decodeError: E.Group.decodeError))
                 }
             }
             continuation.onTermination = { _ in task.cancel() }
@@ -229,7 +244,7 @@ public struct APIClientImpl: APIClient {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let request = try await buildRequest(
+                    let (request, _) = try await buildRequest(
                         method: E.method.rawValue,
                         path: E.resolvePath(with: contract),
                         queryParameters: contract.queryParameters,
@@ -244,14 +259,8 @@ public struct APIClientImpl: APIClient {
                         continuation.yield(sse)
                     }
                     continuation.finish()
-                } catch let error as HTTPStatusError {
-                    let mapped = E.Group.decodeError(
-                        statusCode: error.status, data: error.body,
-                        headers: dictionary(error.headers), decoder: bodyDecoder
-                    ) ?? mapToAPIError(statusCode: error.status, data: error.body)
-                    continuation.finish(throwing: mapped)
                 } catch {
-                    continuation.finish(throwing: error)
+                    continuation.finish(throwing: mapStreamFailure(error, decodeError: E.Group.decodeError))
                 }
             }
             continuation.onTermination = { _ in task.cancel() }
@@ -260,6 +269,8 @@ public struct APIClientImpl: APIClient {
 
     // MARK: - Request building
 
+    /// Builds one request, and reports the token it attached so the caller can tell a
+    /// refreshed credential from the one the server just rejected.
     private func buildRequest(
         method: String,
         path: String,
@@ -270,7 +281,7 @@ public struct APIClientImpl: APIClient {
         groupHeaders: [String: String],
         endpointHeaders: [String: String],
         accept: String
-    ) async throws -> HTTPRequest {
+    ) async throws -> (request: HTTPRequest, token: String?) {
         // appendingPathComponent("") appends a trailing slash. When the base URL is
         // already a complete endpoint (OpenAI-compatible hosts, where the contract's path
         // is empty by design) that produced `.../chat/completions/`, which Groq rejects
@@ -280,8 +291,14 @@ public struct APIClientImpl: APIClient {
             url: requestURL, resolvingAgainstBaseURL: true
         ) else { throw APIError.invalidURL }
 
+        let token: String?
+        switch authScheme {
+        case .none: token = nil
+        case .bearer, .apiKey, .queryParam: token = try await authToken.value(scopes: scopes)
+        }
+
         var items = components.queryItems ?? []
-        if case .queryParam(let name) = authScheme, let token = try await resolveToken(scopes: scopes) {
+        if case .queryParam(let name) = authScheme, let token {
             items.append(URLQueryItem(name: name, value: token))
         }
         if let queryParameters, !queryParameters.isEmpty {
@@ -295,52 +312,68 @@ public struct APIClientImpl: APIClient {
         if body != nil { headers["Content-Type"] = "application/json" }
         for (key, value) in defaultHeaders { headers[key] = value }
 
+        // The header the credential occupies, and so the one a later header may not take.
+        // Nil when nothing was attached, which leaves a group header free to be the
+        // credential itself.
+        let credentialHeader: String?
         switch authScheme {
         case .none, .queryParam:
-            break
+            credentialHeader = nil
         case .bearer:
-            if let token = try await resolveToken(scopes: scopes) { headers["Authorization"] = "Bearer \(token)" }
+            if let token { headers["Authorization"] = "Bearer \(token)" }
+            credentialHeader = token.map { _ in "Authorization" }
         case .apiKey(let headerName):
-            if let token = try await resolveToken(scopes: scopes) { headers[headerName] = token }
+            if let token { headers[headerName] = token }
+            credentialHeader = token.map { _ in headerName }
         }
-        for (key, value) in groupHeaders { headers[key] = value }
-        for (key, value) in endpointHeaders { headers[key] = value }
 
-        return HTTPRequest(method: method, url: url, headers: headers, body: body, timeout: timeout)
+        for (key, value) in groupHeaders {
+            try reject(key, collidingWith: credentialHeader)
+            headers[key] = value
+        }
+        for (key, value) in endpointHeaders {
+            try reject(key, collidingWith: credentialHeader)
+            headers[key] = value
+        }
+
+        return (HTTPRequest(method: method, url: url, headers: headers, body: body, timeout: timeout), token)
     }
 
-    // Runs once per call, before the retry loop, which is why a retry reuses the same
-    // token and a 401 cannot trigger a refresh from here.
-    private func resolveToken(scopes: [String]) async throws -> String? {
-        if let scoped = authTokenProvider as? ScopedAuthTokenProvider {
-            return try await scoped.fetchToken(scopes: scopes)
-        }
-        return try await authTokenProvider?.fetchToken()
+    private func reject(_ name: String, collidingWith credentialHeader: String?) throws {
+        guard let credentialHeader,
+              name.caseInsensitiveCompare(credentialHeader) == .orderedSame
+        else { return }
+        throw APIError.conflictingAuthHeader(name: credentialHeader)
     }
 
+    /// Sends, and on a 401 gives the token provider one chance to replace the credential.
+    ///
+    /// The rebuild runs the whole request-building path again, so the renewed token is
+    /// attached exactly the way the first one was. A second send happens only when the
+    /// provider actually returned a different token — a provider with nothing new to offer
+    /// costs no extra round trip, and cannot put the client in a loop.
     private func send(
-        _ request: HTTPRequest,
         endpoint: APIEndpoint,
-        decodeError: @Sendable (Int, Data, [String: String], any APIBodyDecoder) -> (any Error)?
+        scopes: [String],
+        decodeError: @Sendable (Int, Data, [String: String], any APIBodyDecoder) -> (any Error)?,
+        build: () async throws -> (request: HTTPRequest, token: String?)
     ) async throws -> HTTPResponse {
-        let response: HTTPResponse
-        do {
-            response = try await sendTransport.send(request)
-        // A status error is a response, not a transport failure. Folding it back into
-        // one keeps every non-2xx on a single path, so `.httpError` logs and events fire
-        // whichever way the transport chose to report the status.
-        } catch let error as HTTPStatusError {
-            response = HTTPResponse(status: error.status, headers: error.headers, body: error.body)
-        } catch {
-            throw APIError.networkError(error)
+        let (request, token) = try await build()
+        var response = try await transmit(request)
+
+        if response.status == 401, let token {
+            let renewed = try await authToken.refreshed(scopes: scopes, rejecting: token)
+            if renewed != token {
+                response = try await transmit(try await build().request)
+            }
         }
 
         if response.isSuccess {
-            logContinuation.yield(.success(endpoint: endpoint, statusCode: response.status, data: response.body))
+            logObservers.yield(.success(endpoint: endpoint, statusCode: response.status, data: response.body))
             return response
         }
 
-        logContinuation.yield(.httpError(endpoint: endpoint, statusCode: response.status, data: response.body))
+        logObservers.yield(.httpError(endpoint: endpoint, statusCode: response.status, data: response.body))
         emitEvent(for: response, endpoint: endpoint)
         if let custom = decodeError(response.status, response.body, dictionary(response.headers), bodyDecoder) {
             throw custom
@@ -348,24 +381,58 @@ public struct APIClientImpl: APIClient {
         throw mapToAPIError(statusCode: response.status, data: response.body)
     }
 
+    private func transmit(_ request: HTTPRequest) async throws -> HTTPResponse {
+        do {
+            return try await sendTransport.send(request)
+        // A status error is a response, not a transport failure. Folding it back into
+        // one keeps every non-2xx on a single path, so `.httpError` logs and events fire
+        // whichever way the transport chose to report the status.
+        } catch let error as HTTPStatusError {
+            return HTTPResponse(status: error.status, headers: error.headers, body: error.body)
+        } catch {
+            throw APIError.networkError(error)
+        }
+    }
+
     // MARK: - Telemetry / errors
 
     private func emitEvent(for response: HTTPResponse, endpoint: APIEndpoint) {
         switch response.status {
-        case 401: eventContinuation.yield(.unauthorized(endpoint: endpoint, data: response.body))
-        case 403: eventContinuation.yield(.forbidden(endpoint: endpoint, data: response.body))
+        case 401: eventObservers.yield(.unauthorized(endpoint: endpoint, data: response.body))
+        case 403: eventObservers.yield(.forbidden(endpoint: endpoint, data: response.body))
         case 429:
             let retryAfter = response.headers["retry-after"].flatMap { TimeInterval($0) }
-            eventContinuation.yield(.rateLimited(endpoint: endpoint, retryAfter: retryAfter, data: response.body))
-        case 503: eventContinuation.yield(.serviceUnavailable(endpoint: endpoint, data: response.body))
-        case 500...599: eventContinuation.yield(.serverError(statusCode: response.status, endpoint: endpoint, data: response.body))
+            eventObservers.yield(.rateLimited(endpoint: endpoint, retryAfter: retryAfter, data: response.body))
+        case 503: eventObservers.yield(.serviceUnavailable(endpoint: endpoint, data: response.body))
+        case 500...599: eventObservers.yield(.serverError(statusCode: response.status, endpoint: endpoint, data: response.body))
         default: break
+        }
+    }
+
+    /// Puts a streaming failure in the shape a buffered call's failure has, so one `catch`
+    /// serves both. Anything this layer did not produce — the auth provider's own error,
+    /// an encoding failure, ``APIError/invalidURL`` — is left exactly as it was.
+    private func mapStreamFailure(
+        _ error: any Error,
+        decodeError: @Sendable (Int, Data, [String: String], any APIBodyDecoder) -> (any Error)?
+    ) -> any Error {
+        switch error {
+        case let status as HTTPStatusError:
+            return decodeError(status.status, status.body, dictionary(status.headers), bodyDecoder)
+                ?? mapToAPIError(statusCode: status.status, data: status.body)
+        case is DecodingError:
+            return APIError.decodingError(error)
+        case is TransportError:
+            return APIError.networkError(error)
+        default:
+            return error
         }
     }
 
     private func mapToAPIError(statusCode: Int, data: Data) -> APIError {
         switch statusCode {
-        case 401, 403: return .unauthorized
+        case 401: return .unauthorized(data: data)
+        case 403: return .forbidden(data: data)
         default: return .httpError(statusCode: statusCode, data: data)
         }
     }

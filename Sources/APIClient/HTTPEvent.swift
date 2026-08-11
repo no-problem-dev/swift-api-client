@@ -23,8 +23,8 @@ import Foundation
 public enum HTTPEvent: Sendable {
     /// 401: the credential was rejected. Clear the session and re-authenticate.
     ///
-    /// Distinct from ``forbidden(endpoint:data:)`` here, though ``APIError`` collapses
-    /// both into ``APIError/unauthorized``.
+    /// Distinct from ``forbidden(endpoint:data:)``, as the thrown
+    /// ``APIError/unauthorized(data:)`` is from ``APIError/forbidden(data:)``.
     case unauthorized(endpoint: APIEndpoint, data: Data)
     /// 403: the credential was accepted and the operation is still not permitted.
     ///

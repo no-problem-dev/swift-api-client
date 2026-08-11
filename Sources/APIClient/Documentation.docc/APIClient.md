@@ -119,8 +119,9 @@ do {
 }
 ```
 
-``APIError/unauthorized`` covers 401 and 403 together and drops the body. When the
-difference matters, take it from the events stream instead.
+``APIError/unauthorized(data:)`` and ``APIError/forbidden(data:)`` are separate, and each
+carries the body the server sent — so "sign in again" is distinguishable from "this account
+may not do that" at the `catch` itself.
 
 ### Handle 401 once, not everywhere
 
@@ -143,10 +144,11 @@ Task {
 }
 ```
 
-Start exactly one such task and keep it alive for the client's lifetime. `AsyncStream`
-serves a single consumer, so a second iterator splits the events with the first rather
-than receiving copies, and the buffer is unbounded — a client nobody observes retains
-every event it has emitted. `logs` works the same way and carries every completed request.
+Every observer sees every event, so a second task iterating `events` receives copies rather
+than taking them from the first. Nothing is kept for an observer that does not exist yet: a
+client nobody observes retains no response bodies at all, and an observer that starts late
+sees what is emitted from then on. `logs` works the same way and carries every completed
+request. See ``TelemetryStream``.
 
 ### Streaming runs a shorter path
 

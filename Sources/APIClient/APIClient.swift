@@ -30,20 +30,17 @@ public protocol APIClient: APIExecutable, StreamingAPIExecutable {
     /// not replace the thrown error — the call still fails — they save every call site
     /// from repeating the same response to it.
     ///
-    /// Two limits are worth designing around. `AsyncStream` serves a single consumer, so
-    /// exactly one long-lived task should iterate this; a second iterator divides the
-    /// events with the first instead of receiving copies. And the buffer is unbounded, so
-    /// a client nobody iterates retains every event it has ever emitted.
+    /// Every observer sees every event, and an event emitted before anyone was observing
+    /// is not kept — see ``TelemetryStream``.
     ///
     /// Only buffered calls emit events. Failures from ``APIClientImpl/execute(_:)`` and
     /// ``APIClientImpl/executeEventStream(_:)`` never reach this stream.
-    var events: AsyncStream<HTTPEvent> { get }
+    var events: TelemetryStream<HTTPEvent> { get }
 
     /// Every completed request, successful or not, in a shape a console or an analytics sink can take.
     ///
-    /// Same single-consumer, unbounded-buffer contract as ``events``, and the same
-    /// blind spot: SSE calls produce no entries.
-    var logs: AsyncStream<HTTPLog> { get }
+    /// Same delivery as ``events``, and the same blind spot: SSE calls produce no entries.
+    var logs: TelemetryStream<HTTPLog> { get }
 }
 
 /// The wire format for `Date` in request and response bodies.

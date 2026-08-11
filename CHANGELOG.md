@@ -8,6 +8,42 @@ published verbatim as the body of the matching GitHub Release.
 
 ## [Unreleased]
 
+### Removed
+
+- **BREAKING** — `APIError.unauthorized` splits into `.unauthorized(data:)` and `.forbidden(data:)`,
+  each carrying the response body. Collapsed, a caller could not tell "sign in again" from "this
+  account may not do that", and could not show what the server said. Both facts were already on the
+  `events` stream; they were simply not in the thrown value.
+- `APIError.invalidResponse` is gone. It was never constructed — the transport owns that
+  distinction and reports it as `TransportError.invalidResponse`, so raising it here would have
+  meant unwrapping the transport's error to re-wrap it.
+- `events` and `logs` change type. Each observer now gets its own buffered stream, so a second
+  observer no longer silently splits the events with the first, and a client nobody observes
+  retains nothing.
+
+### Fixed
+
+- **Streaming errors were not mapped.** The streaming `execute` finished the continuation with
+  whatever it caught, so a decode failure arrived as a raw `DecodingError` and a status failure
+  arrived raw — while the buffered path and `executeEventStream` both mapped. A caller who wrapped
+  a buffered call in `catch APIError.httpError` and reused it for a streaming one silently stopped
+  matching.
+- **Auth had no refresh path, and concurrent callers each entered the provider.** The token was
+  resolved once per call before the retrying transport, so a 401 could never trigger a renewal; and
+  nothing serialised provider calls, so N concurrent requests fired N refreshes — which, with
+  rotating refresh tokens, invalidate each other. A single-flight actor now coalesces them, and a
+  401 rebuilds and resends once, only when the provider actually returned a different token.
+- **A group or endpoint header could silently replace the resolved token.** `commonHeaders` and
+  `additionalHeaders` were applied after `Authorization` with no diagnostic; this is now refused
+  before sending.
+- Only success bodies were capped in the log. A 500 returning a large HTML page was pretty-printed
+  in full — the pathological case was the one not guarded.
+
+### Changed
+
+- Raised the swift-http-transport pin to 2.0.0.
+
+
 ## [3.0.3] - 2026-08-11
 
 ### Changed

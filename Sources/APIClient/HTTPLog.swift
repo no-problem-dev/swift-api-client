@@ -28,9 +28,9 @@ extension HTTPLog: CustomStringConvertible {
     /// A multi-line block for a human reading a console, not a format to parse.
     ///
     /// JSON bodies are pretty-printed, other bodies appear as text, and bodies that are
-    /// not UTF-8 appear as a byte count. Success bodies over 10 KB are replaced by their
-    /// size; error and decode-failure bodies are not, so a large error payload is
-    /// rendered in full.
+    /// not UTF-8 appear as a byte count. Any body over 10 KB is replaced by its size,
+    /// whichever case carries it — a 500 answering with a large HTML page is the one that
+    /// most needs the cap, not the one least likely to hit it.
     public var description: String {
         switch self {
         case .success(let endpoint, let statusCode, let data):
@@ -50,12 +50,8 @@ extension HTTPLog: CustomStringConvertible {
 
         """
 
-        if data.count < 10000 {
-            output += "📄 Response Data:\n"
-            output += Self.formatJSON(data: data)
-        } else {
-            output += "📄 Response Data: \(data.count) bytes (too large to display)"
-        }
+        output += "📄 Response Data:\n"
+        output += Self.formatBody(data: data)
 
         output += "\n✅ ========== END REQUEST SUCCESS =========="
         return output
@@ -69,7 +65,7 @@ extension HTTPLog: CustomStringConvertible {
         📄 Error Response:
 
         """
-        output += Self.formatJSON(data: data)
+        output += Self.formatBody(data: data)
         output += "\n❌ ========== END HTTP ERROR =========="
         return output
     }
@@ -84,9 +80,20 @@ extension HTTPLog: CustomStringConvertible {
         📄 Response Data:
 
         """
-        output += Self.formatJSON(data: data)
+        output += Self.formatBody(data: data)
         output += "\n❌ ========== END DECODE ERROR =========="
         return output
+    }
+
+    /// The largest body rendered in full. Above it only the size is printed, which also
+    /// keeps a big payload from being materialised into a `String` twice on the way there.
+    private static let bodyDisplayLimit = 10_000
+
+    private static func formatBody(data: Data) -> String {
+        guard data.count < bodyDisplayLimit else {
+            return "\(data.count) bytes (too large to display)"
+        }
+        return formatJSON(data: data)
     }
 
     private static func formatJSON(data: Data) -> String {
