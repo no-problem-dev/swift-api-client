@@ -10,6 +10,13 @@ published verbatim as the body of the matching GitHub Release.
 
 ### Changed
 
+- Raised the swift-structured-data pin to 3.0.0. That release makes the YAML parser reject
+  constructs it does not model instead of silently dropping them; nothing in this package's own
+  API changes.
+
+
+### Changed
+
 - **`APIContract` and `HTTPTransport` are no longer re-exported.** Code that used their
   types through `import APIClient` alone now imports them explicitly. Re-exporting made
   their public surface part of this package's, which forced a major here every time a
