@@ -52,7 +52,10 @@ published verbatim as the body of the matching GitHub Release.
 
 ### Changed
 
-- Raised the swift-http-transport pin to 2.0.0.
+- **Correction, added after release.** This section originally said the swift-http-transport pin
+  was raised to 2.0.0. It was not — the 4.0.0 tag still pins `from: "1.0.0"`, so **4.0.0 cannot
+  resolve alongside http-transport 2.x and should not be used**. The pin actually landed in 5.0.0.
+  The entry was written before the change it described, and the release went out in between.
 
 
 ## [3.0.3] - 2026-08-11
