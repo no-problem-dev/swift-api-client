@@ -69,7 +69,7 @@ public struct APIClientImpl: APIClient {
     ) {
         self.baseURL = baseURL
         self.transport = transport
-        self.sendTransport = RetryingTransport(base: transport, policy: retryPolicy, rateLimitMapping: rateLimitMapping)
+        self.sendTransport = RetryingTransport(base: AnyStreamingTransport(transport), policy: retryPolicy, rateLimitMapping: rateLimitMapping)
         self.authToken = AuthToken(provider: authTokenProvider)
         self.timeout = timeout
         self.defaultHeaders = defaultHeaders

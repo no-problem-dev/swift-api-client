@@ -8,6 +8,13 @@ published verbatim as the body of the matching GitHub Release.
 
 ## [Unreleased]
 
+### Changed
+
+- Raised the swift-http-transport pin to 2.1.0 and wraps the injected transport in
+  `AnyStreamingTransport`. `RetryingTransport` is generic now, so an existential cannot be handed
+  to it directly; the box keeps the streaming capability through the wrap.
+
+
 ## [4.0.0] - 2026-08-11
 
 ### Removed
