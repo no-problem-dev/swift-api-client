@@ -8,6 +8,8 @@ published verbatim as the body of the matching GitHub Release.
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-08-11
+
 ### Removed
 
 - **BREAKING** — `APIError.unauthorized` splits into `.unauthorized(data:)` and `.forbidden(data:)`,
