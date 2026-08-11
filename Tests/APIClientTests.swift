@@ -25,11 +25,11 @@ final class APIEndpointTests: XCTestCase {
 final class APIErrorTests: XCTestCase {
     func testNetworkErrorDescription() {
         let error = APIError.networkError(NSError(domain: "T", code: -1, userInfo: [NSLocalizedDescriptionKey: "Network unreachable"]))
-        XCTAssertTrue(error.errorDescription?.contains("ネットワークエラー") ?? false)
+        XCTAssertEqual(error.errorDescription, "Network error: Network unreachable")
     }
-    func testInvalidURLDescription() { XCTAssertEqual(APIError.invalidURL.errorDescription, "無効なURLです") }
-    func testUnauthorizedDescription() { XCTAssertEqual(APIError.unauthorized.errorDescription, "認証が必要です") }
-    func testHTTPErrorDescription() { XCTAssertEqual(APIError.httpError(statusCode: 404, data: Data()).errorDescription, "HTTPエラー: 404") }
+    func testInvalidURLDescription() { XCTAssertEqual(APIError.invalidURL.errorDescription, "Invalid URL") }
+    func testUnauthorizedDescription() { XCTAssertEqual(APIError.unauthorized.errorDescription, "Authentication required") }
+    func testHTTPErrorDescription() { XCTAssertEqual(APIError.httpError(statusCode: 404, data: Data()).errorDescription, "HTTP error: 404") }
     func testConformsToLocalizedError() {
         let error: LocalizedError = APIError.invalidURL
         XCTAssertNotNil(error.errorDescription)

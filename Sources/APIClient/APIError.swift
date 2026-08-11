@@ -58,17 +58,17 @@ public enum APIError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .networkError(let error):
-            return "ネットワークエラー: \(error.localizedDescription)"
+            return "Network error: \(error.localizedDescription)"
         case .decodingError(let error):
-            return "デコードエラー: \(error.localizedDescription)"
+            return "Decoding error: \(error.localizedDescription)"
         case .invalidURL:
-            return "無効なURLです"
+            return "Invalid URL"
         case .invalidResponse:
-            return "無効なレスポンスです"
+            return "Invalid response"
         case .unauthorized:
-            return "認証が必要です"
+            return "Authentication required"
         case .httpError(let statusCode, _):
-            return "HTTPエラー: \(statusCode)"
+            return "HTTP error: \(statusCode)"
         }
     }
 }

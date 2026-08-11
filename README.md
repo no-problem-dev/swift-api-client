@@ -2,7 +2,7 @@ English | [日本語](./README.ja.md)
 
 # swift-api-client
 
-An HTTP client for Swift apps that run typed endpoint contracts, buffered or streaming, over one configuration.
+An HTTP client for Swift apps that catches calls which no longer match your API at compile time, and handles authentication, retries and error reporting once for both plain and streaming responses.
 
 ![Swift](https://img.shields.io/badge/Swift-6.0-orange.svg)
 ![Platforms](https://img.shields.io/badge/Platforms-iOS%2017.0+%20%7C%20macOS%2014.0+-blue.svg)

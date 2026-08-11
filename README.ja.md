@@ -2,7 +2,7 @@
 
 # swift-api-client
 
-型付きのエンドポイント契約を、バッファ応答でもストリーミングでも、ひとつの設定のまま実行する Swift 向け HTTP クライアント。
+API と食い違った呼び出しをコンパイル時に弾き、認証・リトライ・エラー通知を、通常応答でもストリーミングでも一度書けば済ませる Swift 向け HTTP クライアント。
 
 ![Swift](https://img.shields.io/badge/Swift-6.0-orange.svg)
 ![Platforms](https://img.shields.io/badge/Platforms-iOS%2017.0+%20%7C%20macOS%2014.0+-blue.svg)
