@@ -5,7 +5,7 @@ English | [日本語](./README.ja.md)
 An HTTP client for Swift apps that catches calls which no longer match your API at compile time, and handles authentication, retries and error reporting once for both plain and streaming responses.
 
 ![Swift](https://img.shields.io/badge/Swift-6.0-orange.svg)
-![Platforms](https://img.shields.io/badge/Platforms-iOS%2017.0+%20%7C%20macOS%2014.0+-blue.svg)
+![Platforms](https://img.shields.io/badge/Platforms-iOS%2017.0+%20%7C%20macOS%2014.0+%20%7C%20Linux-blue.svg)
 ![SPM](https://img.shields.io/badge/Swift_Package_Manager-compatible-brightgreen.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
@@ -54,7 +54,7 @@ the full walkthrough from declaring a contract to handling 401 once for the whol
 
 ## Requirements
 
-iOS 17.0+ · macOS 14.0+ · Swift 6.0+
+iOS 17.0+ · macOS 14.0+ · Linux · Swift 6.0+
 
 ## Installation
 

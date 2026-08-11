@@ -5,7 +5,7 @@
 API と食い違った呼び出しをコンパイル時に弾き、認証・リトライ・エラー通知を、通常応答でもストリーミングでも一度書けば済ませる Swift 向け HTTP クライアント。
 
 ![Swift](https://img.shields.io/badge/Swift-6.0-orange.svg)
-![Platforms](https://img.shields.io/badge/Platforms-iOS%2017.0+%20%7C%20macOS%2014.0+-blue.svg)
+![Platforms](https://img.shields.io/badge/Platforms-iOS%2017.0+%20%7C%20macOS%2014.0+%20%7C%20Linux-blue.svg)
 ![SPM](https://img.shields.io/badge/Swift_Package_Manager-compatible-brightgreen.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
@@ -53,7 +53,7 @@ for try await chunk in client.execute(StreamCompletion(prompt: prompt)) {
 
 ## 必要要件
 
-iOS 17.0+ · macOS 14.0+ · Swift 6.0+
+iOS 17.0+ · macOS 14.0+ · Linux · Swift 6.0+
 
 ## インストール
 
