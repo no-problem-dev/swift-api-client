@@ -8,6 +8,14 @@ published verbatim as the body of the matching GitHub Release.
 
 ## [Unreleased]
 
+### Fixed
+
+- The dependency floor for swift-http-transport was left at 2.0.0 in 5.1.0, but the raw-frame
+  reporting added there calls `sseEvents(_:onRawFrame:)`, which arrived in 2.2.0. A consumer whose
+  resolution already pinned an older 2.x got "extra trailing closure passed in call" from inside
+  this package — a build failure in a dependency, from a version range that claimed to allow it.
+  The floor is now 2.2.0, so resolution reports the real requirement instead.
+
 ## [5.1.0] - 2026-08-24
 
 ### Added
