@@ -8,6 +8,8 @@ published verbatim as the body of the matching GitHub Release.
 
 ## [Unreleased]
 
+## [5.1.1] - 2026-08-24
+
 ### Fixed
 
 - The dependency floor for swift-http-transport was left at 2.0.0 in 5.1.0, but the raw-frame
