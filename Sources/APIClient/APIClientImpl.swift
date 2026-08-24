@@ -180,8 +180,9 @@ public struct APIClientImpl: APIClient {
     /// This path is deliberately thinner than the buffered one, in ways that matter:
     ///
     /// - **No retries.** `retryPolicy` and `rateLimitMapping` are not in play here.
-    /// - **No telemetry.** Nothing reaches `events` or `logs`, including a stream that
-    ///   fails outright, so a 401 on a stream will not drive your app-wide logout.
+    /// - **No telemetry beyond the raw feed.** Nothing reaches `events`, and the only thing
+    ///   reaching `logs` is ``HTTPLog/sseFrame(endpoint:chunk:)`` — one per chunk, so a 401 on a
+    ///   stream still will not drive your app-wide logout. Failures are not logged here either.
     /// - **No refresh.** The token is resolved once when the stream opens; a 401 here
     ///   does not renew it the way a buffered call's does.
     ///
@@ -209,7 +210,12 @@ public struct APIClientImpl: APIClient {
                         endpointHeaders: contract.additionalHeaders,
                         accept: "text/event-stream"
                     )
-                    for try await sse in transport.sseEvents(request) {
+                    let endpoint = APIEndpoint(path: E.resolvePath(with: contract), method: E.method)
+                    let sink = logObservers
+                    let frames = transport.sseEvents(request) { chunk in
+                        sink.yield(.sseFrame(endpoint: endpoint, chunk: chunk))
+                    }
+                    for try await sse in frames {
                         let payload = sse.data
                         if payload.isEmpty || payload == "[DONE]" { continue }
                         let event = try bodyDecoder.decode(E.Event.self, from: Data(payload.utf8))
@@ -255,7 +261,12 @@ public struct APIClientImpl: APIClient {
                         endpointHeaders: contract.additionalHeaders,
                         accept: "text/event-stream"
                     )
-                    for try await sse in transport.sseEvents(request) {
+                    let endpoint = APIEndpoint(path: E.resolvePath(with: contract), method: E.method)
+                    let sink = logObservers
+                    let frames = transport.sseEvents(request) { chunk in
+                        sink.yield(.sseFrame(endpoint: endpoint, chunk: chunk))
+                    }
+                    for try await sse in frames {
                         continuation.yield(sse)
                     }
                     continuation.finish()

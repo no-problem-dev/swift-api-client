@@ -8,6 +8,22 @@ published verbatim as the body of the matching GitHub Release.
 
 ## [Unreleased]
 
+### Added
+
+- `HTTPLog.sseFrame(endpoint:chunk:)` carries one chunk of an SSE body as received, before
+  parsing. Parsing is lossy in the way that matters when the question is *what did the server
+  actually send*: the bytes inside a `data:` line, and where one chunk ended, are both gone by the
+  time a frame is decoded. Chasing a trailing newline in a model's streamed text had no evidence
+  to work from. Printed with newlines spelled out (`␊`, `␍`), because a newline the server sent
+  and a line break the console introduced look identical otherwise.
+
+### Changed
+
+- The streaming path's "no telemetry" guarantee now has one exception, documented on
+  `execute(_:)`: `logs` receives an `sseFrame` per chunk. Nothing else changed — `events` stays
+  silent, failures are still not logged there, and a 401 on a stream still will not drive an
+  app-wide logout.
+
 ## [5.0.0] - 2026-08-11
 
 ### Changed

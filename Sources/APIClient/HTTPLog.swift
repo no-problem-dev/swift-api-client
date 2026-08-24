@@ -3,7 +3,7 @@ import Foundation
 /// One finished request, in the shape a console line or an analytics event needs.
 ///
 /// Read these from `APIClientImpl.logs`. Every buffered call produces exactly one entry
-/// whether it succeeded or not; SSE calls produce none.
+/// whether it succeeded or not; an SSE call produces one ``sseFrame`` per chunk received.
 ///
 /// Switch over the cases to send structured metrics, or `print(log)` to get the
 /// ``description`` block while debugging.
@@ -22,6 +22,15 @@ public enum HTTPLog: Sendable {
     /// `data` is the body that failed. Nothing else keeps those bytes — if you drop this
     /// entry, the payload that caused the failure is gone.
     case decodingError(endpoint: APIEndpoint, error: String, data: Data, targetType: String)
+    /// One chunk of an SSE body, as received and before parsing.
+    ///
+    /// Parsing is lossy in the way that matters when the question is *what did the server
+    /// actually send*: the bytes inside a `data:` line, and where one chunk ended, are both gone
+    /// by the time a frame is decoded. Chasing a trailing newline in a model's streamed text has
+    /// no other evidence to work from — nothing else keeps these bytes.
+    ///
+    /// Expect many of these per call. They are the raw feed, not a summary.
+    case sseFrame(endpoint: APIEndpoint, chunk: Data)
 }
 
 extension HTTPLog: CustomStringConvertible {
@@ -37,11 +46,23 @@ extension HTTPLog: CustomStringConvertible {
             return formatSuccess(endpoint: endpoint, statusCode: statusCode, data: data)
         case .httpError(let endpoint, let statusCode, let data):
             return formatHTTPError(endpoint: endpoint, statusCode: statusCode, data: data)
+        case .sseFrame(let endpoint, let chunk):
+            return formatSSEFrame(endpoint: endpoint, chunk: chunk)
         case .decodingError(let endpoint, let error, let data, let targetType):
             return formatDecodingError(endpoint: endpoint, error: error, data: data, targetType: targetType)
         }
     }
 
+    /// Spells out the newlines so they cannot hide in the console's own line breaks.
+    ///
+    /// A trailing newline the server sent and a line break this block introduced look
+    /// identical once printed, and telling them apart is the whole reason to read a raw frame.
+    private func formatSSEFrame(endpoint: APIEndpoint, chunk: Data) -> String {
+        let text = String(decoding: chunk, as: UTF8.self)
+            .replacingOccurrences(of: "\r", with: "␍")
+            .replacingOccurrences(of: "\n", with: "␊")
+        return "📡 SSE \(endpoint.method.rawValue) \(endpoint.path) — \(chunk.count) bytes\n" + text
+    }
     private func formatSuccess(endpoint: APIEndpoint, statusCode: Int, data: Data) -> String {
         var output = """
         ✅ ========== API REQUEST SUCCESS ==========

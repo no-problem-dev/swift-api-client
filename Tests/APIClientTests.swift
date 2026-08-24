@@ -304,6 +304,40 @@ final class APIClientImplTests: XCTestCase {
         XCTAssertEqual(mock.recordedRequests.first?.headers["accept"], "text/event-stream")
     }
 
+    func testStreamingReportsRawFrames() async throws {
+        let sse = "data: {\"delta\":\"a\"}\n\ndata: [DONE]\n\n"
+        let mock = MockTransport(streamChunks: [Data(sse.utf8)])
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
+        let logs = client.logs
+
+        let collected = Task {
+            var frames: [Data] = []
+            for await log in logs {
+                if case .sseFrame(_, let chunk) = log { frames.append(chunk) }
+            }
+            return frames
+        }
+
+        for try await _ in client.execute(StreamContract()) {}
+        collected.cancel()
+
+        // 生チャンクが、パース前のバイトのまま届いていること。
+        // これが無いと「モデルが送った改行」を後から確かめる術がない。
+        let frames = await collected.value
+        XCTAssertEqual(frames.first, Data(sse.utf8))
+    }
+
+    func testRawFrameSpellsOutNewlines() {
+        let log = HTTPLog.sseFrame(
+            endpoint: APIEndpoint(path: "/v1/chat", method: .post),
+            chunk: Data("data: hi\n\n".utf8)
+        )
+
+        // 改行がそのまま出ると、コンソール自身の行送りに紛れて区別できなくなる。
+        XCTAssertTrue(log.description.contains("data: hi␊␊"))
+        XCTAssertFalse(log.description.contains("data: hi\n\n"))
+    }
+
     func testExecuteRawReturnsBinaryBody() async throws {
         let audio = Data([0x49, 0x44, 0x33, 0x04, 0x00])
         let mock = MockTransport { _ in HTTPResponse(status: 200, headers: ["Content-Type": "audio/mpeg"], body: audio) }
