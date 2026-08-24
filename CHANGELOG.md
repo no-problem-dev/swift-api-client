@@ -8,6 +8,8 @@ published verbatim as the body of the matching GitHub Release.
 
 ## [Unreleased]
 
+## [5.1.0] - 2026-08-24
+
 ### Added
 
 - `HTTPLog.sseFrame(endpoint:chunk:)` carries one chunk of an SSE body as received, before
