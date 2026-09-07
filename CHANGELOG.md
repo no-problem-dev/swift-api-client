@@ -8,6 +8,49 @@ published verbatim as the body of the matching GitHub Release.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Every response with no body failed the call**, `EmptyOutput` included. A 204 — what a
+  delete normally answers with — went straight to the decoder, and the JSON parser threw
+  "unexpected end of input" before `init(from:)` was reached, so the type that exists to
+  accept nothing never got to accept it. `swift-api-contract` documents `EmptyOutput` as
+  decoding "from any payload, including an empty one"; the second half of that could not
+  happen, because parsing runs first. A 204, a 205, or any status arriving with zero bytes
+  now skips decoding.
+
+### Added
+
+- `EmptyBodyDecodable`: what an `Output` type declares when its endpoint may answer with no
+  body. `EmptyOutput` conforms, so `typealias Output = EmptyOutput` needs nothing further,
+  and `Optional` conforms, so an endpoint that answers with a body only sometimes can say
+  `typealias Output = Thing?` and read `nil` as "nothing came back".
+- `APIError.emptyResponseBody(statusCode:outputType:)` for the case a contract asks for a
+  body the response cannot carry. Deliberately not `decodingError`: nothing was mis-shaped,
+  and a decoder's complaint would point at a payload when the fix is on the contract. It
+  names the type it could not build, and the description names both ways to fix it.
+
+### Changed
+
+- **BREAKING** — the new `APIError` case breaks an exhaustive `switch` over `APIError` that
+  has no `default`. Adding a case to a public enum is source-breaking outside library
+  evolution, and there is one such switch in the family today (`swift-llm-cloud`'s
+  `ProviderSupport.swift`), so this is a real break rather than a theoretical one. Nothing
+  else about the type changed, and `catch` clauses that match specific cases keep working.
+- A 204 or 205 counts as bodiless even if bytes arrive with it. RFC 9110 says neither can
+  carry content, so a body on one is the server contradicting its own status line;
+  `URLSession` does not deliver one anyway, since an HTTP/1.1 parser reads no body for
+  those statuses. Only a mock can produce the case.
+- `HTTPLog.decodingError` is now emitted for both ways a 2xx can fail to produce an
+  `Output`. For a missing body it carries the explanation and empty `data`; for a body that
+  would not decode it carries the `DecodingError` and the bytes, as before.
+- CI runs `swift test` again on push and pull request, from the shared workflow template.
+  It had been removed on the grounds that macOS runner queues cost more than the gate was
+  worth; the cost of not having it turned out to be higher, because "CI is green" then said
+  nothing about the tests. Snapshot tests need no exclusion here — this package has none.
+- The README badge and requirements line said Swift 6.0 while `Package.swift` declares
+  `swift-tools-version: 6.2`. A 6.0 toolchain cannot resolve the manifest at all, so the
+  stated requirement was one the package never met. Both READMEs now say 6.2.
+
 ## [5.1.1] - 2026-08-24
 
 ### Fixed

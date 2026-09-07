@@ -100,9 +100,16 @@ public struct APIClientImpl: APIClient {
     /// header — a `Location`, an ETag, a pagination cursor. `execute(_:)` is this call
     /// with the metadata discarded.
     ///
+    /// **A response with no body is not decoded.** A 204, a 205, or any status arriving
+    /// with zero bytes returns `Output.emptyBody` when the type conforms to
+    /// ``EmptyBodyDecodable`` — `EmptyOutput` and `Optional` do — and fails with
+    /// ``APIError/emptyResponseBody(statusCode:outputType:)`` when it does not. Handing
+    /// such a response to the decoder instead would fail every one of them, `EmptyOutput`
+    /// included, because parsing runs before `init(from:)` gets a say.
+    ///
     /// - Parameter contract: The endpoint to run.
     /// - Returns: The decoded `Output`, the status code, and the response headers.
-    /// - Throws: The group's mapped error if its `decodeError` claims the response, otherwise ``APIError``. A decode failure also emits ``HTTPLog/decodingError(endpoint:error:data:targetType:)`` first, which is the only copy of the offending body.
+    /// - Throws: The group's mapped error if its `decodeError` claims the response, otherwise ``APIError``. A failure to produce `Output` also emits ``HTTPLog/decodingError(endpoint:error:data:targetType:)`` first, which is the only copy of the offending body.
     public func executeWithResponse<E: APIContract>(_ contract: E) async throws -> APIResponse<E.Output>
         where E.Input == E, E: APIInput
     {
@@ -121,6 +128,10 @@ public struct APIClientImpl: APIClient {
                 endpointHeaders: contract.additionalHeaders,
                 accept: "application/json"
             )
+        }
+        guard carriesBody(response) else {
+            let output = try emptyOutput(E.Output.self, statusCode: response.status, endpoint: endpoint)
+            return APIResponse(output: output, statusCode: response.status, headers: dictionary(response.headers))
         }
         do {
             let output = try bodyDecoder.decode(E.Output.self, from: response.body)
@@ -403,6 +414,47 @@ public struct APIClientImpl: APIClient {
         } catch {
             throw APIError.networkError(error)
         }
+    }
+
+    // MARK: - Responses with no body
+
+    /// Whether there is anything for the decoder to work on.
+    ///
+    /// 204 and 205 are defined to carry no body, so they answer `false` whatever arrived —
+    /// a body on either is the server contradicting its own status line, and `URLSession`
+    /// does not deliver one anyway. Every other status is judged by the bytes, which is
+    /// what catches a 200 that answered empty and any response to a `HEAD`.
+    ///
+    /// 304 never reaches here despite also being bodiless: it is not 2xx, so ``send`` has
+    /// already thrown ``APIError/httpError(statusCode:data:)`` for it.
+    private func carriesBody(_ response: HTTPResponse) -> Bool {
+        switch response.status {
+        case 204, 205: return false
+        default: return !response.body.isEmpty
+        }
+    }
+
+    /// The value that stands for a response with no body — or the failure saying the
+    /// contract asked for one that cannot be built from nothing.
+    ///
+    /// The failure is logged the way a decode failure is, so a console watching `logs`
+    /// still shows why the call produced no `Output`. There are no bytes to keep with it.
+    private func emptyOutput<Output: Decodable & Sendable>(
+        _ type: Output.Type, statusCode: Int, endpoint: APIEndpoint
+    ) throws -> Output {
+        guard let emptyBodyType = type as? any EmptyBodyDecodable.Type,
+              let output = emptyBodyType.emptyBody as? Output
+        else {
+            let failure = APIError.emptyResponseBody(
+                statusCode: statusCode, outputType: String(describing: type)
+            )
+            logObservers.yield(.decodingError(
+                endpoint: endpoint, error: failure.errorDescription ?? String(describing: failure),
+                data: Data(), targetType: String(describing: type)
+            ))
+            throw failure
+        }
+        return output
     }
 
     // MARK: - Telemetry / errors

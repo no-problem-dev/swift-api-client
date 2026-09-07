@@ -25,6 +25,18 @@ public enum APIError: LocalizedError {
     /// ``HTTPLog/decodingError(endpoint:error:data:targetType:)`` entry, emitted just
     /// before this is thrown, which is the only place to recover them.
     case decodingError(Error)
+    /// The response carried no body, and the contract's `Output` has no value for that.
+    ///
+    /// A 204 or a 205 says there is no body by definition, and any status can arrive with
+    /// zero bytes. Either is fine when `Output` conforms to ``EmptyBodyDecodable`` —
+    /// `EmptyOutput` and `Optional` both do — and is this error otherwise.
+    ///
+    /// Deliberately not ``decodingError(_:)``. Nothing was mis-shaped: parsing runs before
+    /// `init(from:)` and fails at the end of the input, so a decoder's complaint would name
+    /// the wrong problem and point at a payload rather than at the contract. The fix is on
+    /// the contract, which is why this case names the type it could not build instead of
+    /// wrapping someone else's error.
+    case emptyResponseBody(statusCode: Int, outputType: String)
     /// The base URL and the contract's resolved path did not combine into a usable URL.
     ///
     /// Thrown before anything is sent, so no log entry or event accompanies it. In
@@ -64,6 +76,9 @@ public enum APIError: LocalizedError {
             return "Network error: \(error.localizedDescription)"
         case .decodingError(let error):
             return "Decoding error: \(error.localizedDescription)"
+        case .emptyResponseBody(let statusCode, let outputType):
+            return "HTTP \(statusCode) carried no body, and \(outputType) cannot be built without one. "
+                + "Declare the contract's Output as EmptyOutput, or conform \(outputType) to EmptyBodyDecodable."
         case .invalidURL:
             return "Invalid URL"
         case .conflictingAuthHeader(let name):

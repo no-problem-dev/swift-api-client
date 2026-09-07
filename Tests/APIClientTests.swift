@@ -833,3 +833,243 @@ final class APIClientScopeTests: XCTestCase {
         XCTAssertEqual(mock.recordedRequests.first?.headers["authorization"], "Bearer plain")
     }
 }
+
+// MARK: - Responses with no body
+
+/// `DELETE /v1/bgms/1` — the shape that failed before: a contract whose `Output` is
+/// `EmptyOutput`, answered with 204 and nothing else.
+private struct DeleteContract: APIContract, APIInput {
+    typealias Group = TestAPIGroup
+    typealias Input = Self
+    typealias Output = EmptyOutput
+    static let method: APIMethod = .delete
+    static let subPath = "/bgms/1"
+    func encodeBody(using encoder: any APIBodyEncoder) throws -> Data? { nil }
+    static func decode(pathParameters: [String: String], queryParameters: [String: String], body: Data?, decoder: any APIBodyDecoder) throws -> Self { Self() }
+}
+
+/// An endpoint that answers with a body sometimes and with nothing the rest of the time.
+private struct OptionalOutputContract: APIContract, APIInput {
+    typealias Group = TestAPIGroup
+    typealias Input = Self
+    typealias Output = TestResponse?
+    static let method: APIMethod = .get
+    static let subPath = "/users/latest"
+    func encodeBody(using encoder: any APIBodyEncoder) throws -> Data? { nil }
+    static func decode(pathParameters: [String: String], queryParameters: [String: String], body: Data?, decoder: any APIBodyDecoder) throws -> Self { Self() }
+}
+
+/// A type that both decodes a payload and has a value for the absence of one, which is what
+/// `EmptyBodyDecodable` is for. `EmptyOutput` cannot show this: it has no fields to decode.
+struct Ack: EmptyBodyDecodable, Sendable, Equatable {
+    let acknowledged: Bool
+    static var emptyBody: Ack { Ack(acknowledged: true) }
+}
+
+private struct AckContract: APIContract, APIInput {
+    typealias Group = TestAPIGroup
+    typealias Input = Self
+    typealias Output = Ack
+    static let method: APIMethod = .post
+    static let subPath = "/ack"
+    func encodeBody(using encoder: any APIBodyEncoder) throws -> Data? { nil }
+    static func decode(pathParameters: [String: String], queryParameters: [String: String], body: Data?, decoder: any APIBodyDecoder) throws -> Self { Self() }
+}
+
+/// Before this suite existed, every one of these threw `APIError.decodingError` wrapping the
+/// JSON scanner's "unexpected end of input" — `EmptyOutput` included, because parsing runs
+/// before `init(from:)` and there was nothing to parse.
+final class EmptyResponseBodyTests: XCTestCase {
+    private let baseURL = URL(string: "https://api.example.com")!
+
+    // MARK: The bug
+
+    func test204WithEmptyOutputSucceeds() async throws {
+        let mock = MockTransport(status: 204)
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
+        let response = try await client.executeWithResponse(DeleteContract())
+        XCTAssertEqual(response.output, EmptyOutput())
+        XCTAssertEqual(response.statusCode, 204)
+    }
+
+    /// `APIExecutable`'s value-returning `execute(_:)` reaches the same code, since its
+    /// extension is `executeWithResponse(_:).output`. Both overloads are exercised because
+    /// `Output == EmptyOutput` makes them both applicable at the call site.
+    func test204ReachesBothExecuteOverloads() async throws {
+        let mock = MockTransport([.response(HTTPResponse(status: 204, headers: [:], body: Data())),
+                                  .response(HTTPResponse(status: 204, headers: [:], body: Data()))])
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
+        try await client.execute(DeleteContract())
+        let output: EmptyOutput = try await client.execute(DeleteContract())
+        XCTAssertEqual(output, EmptyOutput())
+        XCTAssertEqual(mock.recordedRequests.count, 2)
+    }
+
+    func test200WithAnEmptyBodyAndEmptyOutputSucceeds() async throws {
+        let mock = MockTransport(status: 200)
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
+        let response = try await client.executeWithResponse(DeleteContract())
+        XCTAssertEqual(response.output, EmptyOutput())
+        XCTAssertEqual(response.statusCode, 200)
+    }
+
+    /// 205 is bodiless by the same clause of RFC 9110 that 204 is.
+    func test205IsTreatedLike204() async throws {
+        let mock = MockTransport(status: 205)
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
+        let response = try await client.executeWithResponse(DeleteContract())
+        XCTAssertEqual(response.statusCode, 205)
+    }
+
+    // MARK: Asking for a body that cannot arrive
+
+    func test204WithARequiredOutputIsNotADecodingError() async {
+        let mock = MockTransport(status: 204)
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
+        do {
+            _ = try await client.executeWithResponse(GetContract())
+            XCTFail("expected error")
+        } catch let APIError.emptyResponseBody(statusCode, outputType) {
+            XCTAssertEqual(statusCode, 204)
+            XCTAssertEqual(outputType, "TestResponse")
+        } catch { XCTFail("unexpected: \(error)") }
+    }
+
+    func test200WithAnEmptyBodyAndARequiredOutputReportsTheEmptyBody() async {
+        let mock = MockTransport(status: 200)
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
+        do {
+            _ = try await client.executeWithResponse(GetContract())
+            XCTFail("expected error")
+        } catch let APIError.emptyResponseBody(statusCode, outputType) {
+            XCTAssertEqual(statusCode, 200)
+            XCTAssertEqual(outputType, "TestResponse")
+        } catch { XCTFail("unexpected: \(error)") }
+    }
+
+    /// The message has to name the fix, because the fix is on the contract and nothing in a
+    /// stack trace points there.
+    func testEmptyResponseBodyDescriptionNamesTheFix() {
+        let description = APIError.emptyResponseBody(statusCode: 204, outputType: "TestResponse").errorDescription ?? ""
+        XCTAssertTrue(description.contains("204"))
+        XCTAssertTrue(description.contains("TestResponse"))
+        XCTAssertTrue(description.contains("EmptyOutput"))
+        XCTAssertTrue(description.contains("EmptyBodyDecodable"))
+    }
+
+    /// A call that produced no `Output` stays visible on `logs`, whichever of the two
+    /// reasons it was. There are no bytes to keep with this one.
+    func testEmptyResponseBodyIsLogged() async throws {
+        let mock = MockTransport(status: 204)
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
+        // Subscribing is synchronous, so entries emitted by the call below are buffered.
+        var entries = client.logs.makeAsyncIterator()
+
+        do {
+            _ = try await client.executeWithResponse(GetContract())
+            XCTFail("expected error")
+        } catch {}
+
+        guard case .success = await entries.next() else { return XCTFail("expected the 2xx entry first") }
+        guard case .decodingError(_, let reason, let data, let targetType) = await entries.next()
+        else { return XCTFail("expected a failure entry") }
+        XCTAssertEqual(targetType, "TestResponse")
+        XCTAssertTrue(data.isEmpty)
+        XCTAssertTrue(reason.contains("EmptyBodyDecodable"))
+    }
+
+    // MARK: The rest of the decode path is unchanged
+
+    func test200WithJSONStillDecodes() async throws {
+        let mock = MockTransport { _ in okResponse(#"{"id":7,"name":"Ada"}"#) }
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
+        let response = try await client.executeWithResponse(GetContract())
+        XCTAssertEqual(response.output, TestResponse(id: 7, name: "Ada"))
+    }
+
+    /// The guard must not swallow real decode failures: a body that arrived and would not
+    /// fit is still `decodingError`, and still carries the bytes on `logs`.
+    func testMalformedJSONIsStillADecodingError() async {
+        let mock = MockTransport { _ in okResponse(#"{"id":"not a number"}"#) }
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
+        do {
+            _ = try await client.executeWithResponse(GetContract())
+            XCTFail("expected error")
+        } catch APIError.decodingError {
+        } catch { XCTFail("unexpected: \(error)") }
+    }
+
+    /// `executeRaw` never decodes, so a 204 hands back the empty body rather than failing.
+    func testExecuteRawIsUnaffected() async throws {
+        let mock = MockTransport(status: 204)
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
+        let response = try await client.executeRaw(GetContract())
+        XCTAssertEqual(response.statusCode, 204)
+        XCTAssertTrue(response.output.isEmpty)
+    }
+
+    /// 304 is bodiless too, and is handled a whole step earlier: it is not 2xx, so the call
+    /// fails as an HTTP error and never reaches the decision about decoding.
+    func test304NeverReachesTheDecoder() async {
+        let mock = MockTransport(status: 304)
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
+        do {
+            _ = try await client.executeWithResponse(GetContract())
+            XCTFail("expected error")
+        } catch let APIError.httpError(statusCode, _) {
+            XCTAssertEqual(statusCode, 304)
+        } catch { XCTFail("unexpected: \(error)") }
+    }
+
+    // MARK: Which types can stand in for an absent body
+
+    func testOptionalOutputIsNilWhenNothingArrives() async throws {
+        let mock = MockTransport(status: 204)
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
+        let response = try await client.executeWithResponse(OptionalOutputContract())
+        XCTAssertNil(response.output)
+    }
+
+    func testOptionalOutputStillDecodesWhenSomethingArrives() async throws {
+        let mock = MockTransport { _ in okResponse(#"{"id":1,"name":"Ada"}"#) }
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
+        let response = try await client.executeWithResponse(OptionalOutputContract())
+        XCTAssertEqual(response.output, TestResponse(id: 1, name: "Ada"))
+    }
+
+    func testConformingTypeSuppliesItsOwnValueForAnAbsentBody() async throws {
+        let mock = MockTransport(status: 204)
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
+        let response = try await client.executeWithResponse(AckContract())
+        XCTAssertEqual(response.output, Ack(acknowledged: true))
+    }
+
+    func testConformingTypeStillDecodesAPayload() async throws {
+        let mock = MockTransport { _ in okResponse(#"{"acknowledged":false}"#) }
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
+        let response = try await client.executeWithResponse(AckContract())
+        XCTAssertEqual(response.output, Ack(acknowledged: false))
+    }
+
+    // MARK: The status line wins over the bytes
+
+    /// RFC 9110 says a 204 "cannot contain content", so bytes on one are the server
+    /// contradicting its own status line. `URLSession` will not deliver them anyway — an
+    /// HTTP/1.1 parser does not read a body for a 204 — so this is reachable only from a
+    /// mock. The status is treated as authoritative rather than making the client's
+    /// behaviour depend on which server bug it met.
+    func test204WithABodyIsStillBodiless() async throws {
+        let mock = MockTransport(status: 204, body: Data(#"{"id":1,"name":"Ada"}"#.utf8))
+        let client = APIClientImpl(baseURL: baseURL, transport: mock)
+        let response = try await client.executeWithResponse(DeleteContract())
+        XCTAssertEqual(response.output, EmptyOutput())
+
+        let second = MockTransport(status: 204, body: Data(#"{"id":1,"name":"Ada"}"#.utf8))
+        let strict = APIClientImpl(baseURL: baseURL, transport: second)
+        do {
+            _ = try await strict.executeWithResponse(GetContract())
+            XCTFail("expected error")
+        } catch APIError.emptyResponseBody {
+        } catch { XCTFail("unexpected: \(error)") }
+    }
+}

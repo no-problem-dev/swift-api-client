@@ -15,12 +15,18 @@ public enum HTTPLog: Sendable {
     /// So this is the reliable place to count failures: the thrown error may be your own
     /// type, and this entry is still here.
     case httpError(endpoint: APIEndpoint, statusCode: Int, data: Data)
-    /// A 2xx body that would not decode, emitted immediately before ``APIError/decodingError(_:)`` is thrown.
+    /// A 2xx response that produced no `Output`, emitted immediately before the failure is thrown.
     ///
-    /// `error` is the `DecodingError`'s description, already flattened to a string so it
-    /// can cross into a logging pipeline; `targetType` names the type that was expected;
-    /// `data` is the body that failed. Nothing else keeps those bytes — if you drop this
-    /// entry, the payload that caused the failure is gone.
+    /// `error` is the reason, already flattened to a string so it can cross into a logging
+    /// pipeline; `targetType` names the type that was expected; `data` is the body that
+    /// failed. Nothing else keeps those bytes — if you drop this entry, the payload that
+    /// caused the failure is gone.
+    ///
+    /// Two failures reach here. A body that would not decode carries the `DecodingError`'s
+    /// description and the bytes, and is followed by ``APIError/decodingError(_:)``. A
+    /// response with no body at all, whose `Output` cannot be built from nothing, carries
+    /// that explanation and empty `data`, and is followed by
+    /// ``APIError/emptyResponseBody(statusCode:outputType:)``.
     case decodingError(endpoint: APIEndpoint, error: String, data: Data, targetType: String)
     /// One chunk of an SSE body, as received and before parsing.
     ///

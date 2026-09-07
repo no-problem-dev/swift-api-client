@@ -99,6 +99,43 @@ let page = try await client.executeWithResponse(ListProducts(cursor: cursor))
 let next = page.headers["x-next-cursor"]
 ```
 
+### Endpoints that answer with no body
+
+A delete usually replies `204 No Content`. Declare `Output` as `EmptyOutput` and there is
+nothing to decode, and nothing to discard at the call site:
+
+```swift
+struct DeleteProduct: APIContract, APIInput {
+    typealias Group = CatalogAPI
+    typealias Input = Self
+    typealias Output = EmptyOutput
+
+    static let method: APIMethod = .delete
+    static let subPath = "/products/{id}"
+
+    let id: String
+    var pathParameters: [String: String] { ["id": id] }
+
+    func encodeBody(using encoder: any APIBodyEncoder) throws -> Data? { nil }
+    static func decode(
+        pathParameters: [String: String], queryParameters: [String: String],
+        body: Data?, decoder: any APIBodyDecoder
+    ) throws -> Self { Self(id: pathParameters["id"] ?? "") }
+}
+
+try await client.execute(DeleteProduct(id: "sku-42"))
+```
+
+A 204, a 205, or any status arriving with zero bytes skips decoding entirely. Running the
+JSON decoder over no bytes fails before the type is ever consulted — the parser reaches the
+end of the input first — so declaring `EmptyOutput` alone would not have saved such a call.
+
+An endpoint that answers with a body sometimes and with nothing the rest of the time can
+say `typealias Output = Product?` and read `nil` as "nothing came back". Any other type
+names its own value for the absence by conforming to ``EmptyBodyDecodable``. An `Output`
+that does none of these fails with ``APIError/emptyResponseBody(statusCode:outputType:)``,
+which names the type it could not build, because the fix belongs on the contract.
+
 ### Catch in the right order
 
 The group's `decodeError` wins: when it claims a response, its error is thrown *instead
@@ -182,6 +219,7 @@ retries, and neither emits `events` or `logs` — including when the stream fail
 
 - ``APIKeyStyle``
 - ``DateStrategy``
+- ``EmptyBodyDecodable``
 
 ### Failures and telemetry
 
