@@ -8,6 +8,8 @@ published verbatim as the body of the matching GitHub Release.
 
 ## [Unreleased]
 
+## [6.0.0] - 2026-09-08
+
 ### Fixed
 
 - **Every response with no body failed the call**, `EmptyOutput` included. A 204 — what a
