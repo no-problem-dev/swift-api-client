@@ -46,10 +46,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ランナーと Xcode は docc.yml と揃える。ポートフォリオの 37/46 が
-      # swift-tools-version: 6.2 で、Swift 6.2 は Xcode 26 でしか来ない。
-      # 撤去前のこのテンプレは macos-15 + latest-stable だったが、それは 6.2 移行より前の版で、
-      # そのまま戻すと**マニフェストの解決すら通らない**。
+      # ランナーと Xcode は docc.yml と揃える。撤去前のこのテンプレは macos-15 + latest-stable だった。
+      #
+      # **「6.2 のマニフェストが解決できないから変えた」ではない。** それは確かめたら偽で、
+      # macos-15 + latest-stable は tools 6.2 の swift-document-scanner と swift-markdown-view の
+      # docc を 2026-08-11 に緑で通している（各 5/5 success）。変える理由は別に 2 つある:
+      #
+      # 1. `latest-stable` は同じファイルのまま月ごとに別のコンパイラを指す。コミットが 1 つも
+      #    無いのに緑が赤に変わりうる。**再現できない関所は関所として弱い**
+      # 2. docc.yml を持つ 42 本のうち 40 本が macos-26 + 26.0.1 を pin していて緑。
+      #    CI のコンパイラをポートフォリオで 1 つに揃えられ、いちばん実績のある構成でもある
+      #
+      # **既知の緊張**: この pin は Swift 6.2 で、手元の開発は Xcode 26.5(6.3.2) / 27.0b(6.4)。
+      # 6.3 以降でしか書けないものを使うと手元で緑・CI で赤になる。pin を上げるかは人の判断。
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
@@ -78,3 +87,29 @@ jobs:
 
       - name: Run Tests
         run: swift test
+
+      # `swift test` はホスト（macOS）向けにビルドするので、`#if canImport(UIKit)` /
+      # `#if os(iOS)` の中は**コンパイルすらされない**。型エラーでも構文エラーでも緑を通る。
+      #
+      # 実測（2026-09-08・swift-document-scanner）: ガードの中に型エラーを 1 つ仕込むと
+      # `swift test` は error 0 件で緑のまま。この step だけが TEST BUILD FAILED で捕まえた。
+      #
+      # つまり agent-runtime 0.18.0 の事故（コンパイルできないテストのままタグ付け）は、
+      # **iOS 限定のコードについては tests.yml を戻しただけでは再発する。** ここが塞ぐ。
+      # roomtone の Infrastructure で実例が出ている（61 本中 31 本が `#if os(iOS)` の中で、
+      # シグネチャ変更に未追随のままコンパイルできず、それでも関所は緑だった）。
+      #
+      # **走らせない。ビルドするだけ。** スナップショットの像の照合はローカルのまま（§7）で、
+      # ここが見るのは「そのコードがコンパイルできるか」だけ。destination が generic なので
+      # シミュレータの起動も要らず、実測 32 秒。
+      - name: Build tests for iOS (compile only)
+        run: |
+          if ! grep -q '\.iOS(' Package.swift; then
+            echo "iOS を宣言していないパッケージなので飛ばす"
+            exit 0
+          fi
+          SCHEME=$(xcodebuild -list -json | python3 -c \
+            'import json,sys; print(next(s for s in json.load(sys.stdin)["workspace"]["schemes"] if s.endswith("-Package")))')
+          echo "scheme: $SCHEME"
+          xcodebuild build-for-testing -scheme "$SCHEME" \
+            -destination 'generic/platform=iOS Simulator' -quiet
