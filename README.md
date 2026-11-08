@@ -49,7 +49,7 @@ onto Swift errors, and observing the event stream are all in the documentation.
 
 ## Documentation
 
-**[API reference and guide](https://no-problem-dev.github.io/swift-api-client/documentation/apiclient/)** —
+**[API reference and guide](Sources/APIClient/Documentation.docc)** —
 the full walkthrough from declaring a contract to handling 401 once for the whole app.
 
 ## Requirements

@@ -48,7 +48,7 @@ for try await chunk in client.execute(StreamCompletion(prompt: prompt)) {
 
 ## ドキュメント
 
-**[API リファレンスとガイド](https://no-problem-dev.github.io/swift-api-client/documentation/apiclient/)** —
+**[API リファレンスとガイド](Sources/APIClient/Documentation.docc)** —
 契約の宣言から、401 をアプリ全体で一度だけ処理するところまでの通しの解説。
 
 ## 必要要件
